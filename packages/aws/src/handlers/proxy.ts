@@ -68,6 +68,13 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: 'Missing _relay metadata' }) }
   }
 
+  const { model, system, items = [], additions = [] } =
+    body as { model: string; system: string; items: RelayItem[]; additions: string[] }
+
+  if (typeof model !== 'string' || !model) {
+    return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: 'Missing model' }) }
+  }
+
   const adapter = ADAPTERS[relay.provider]
   if (!adapter) {
     return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: `Unknown provider: ${relay.provider}` }) }
@@ -90,18 +97,15 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   let headers: Record<string, string> | null = adapter.buildHeaders(apiKey)
   apiKey = null
 
-  const { _relay: _removed, model, system, items = [], additions = [] } =
-    body as { _relay: RelayMeta; model: string; system: string; items: RelayItem[]; additions: string[] }
-
   const messages: CanonicalMessage[] = [
-    ...(items as RelayItem[]).map(item => ({
+    ...items.map(item => ({
       role: (item.from === 'agent' ? 'assistant' : 'user') as CanonicalMessage['role'],
       content: item.body,
     })),
     ...additions.map(content => ({ role: 'user' as const, content })),
   ]
 
-  const req: CanonicalRequest = { model, system, messages }
+  const req: CanonicalRequest = { model, system: system ?? '', messages }
   const requestBody = JSON.stringify(adapter.buildRequestBody(req))
 
   const providerRes = await fetch(adapter.buildUrl(req.model), { method: 'POST', headers, body: requestBody })
