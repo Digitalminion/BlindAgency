@@ -668,7 +668,7 @@ function makeRelay(responseText: string): Relay {
     hasKey: () => true,
     clearKey: vi.fn(),
     send: vi.fn().mockResolvedValue({ text: responseText }),
-    createFetch: () => vi.fn() as unknown as typeof fetch,
+
   }
 }
 
@@ -759,7 +759,7 @@ describe('createRuntime', () => {
     const relay: Relay = {
       setKey: vi.fn(), hasKey: () => true, clearKey: vi.fn(),
       send: vi.fn().mockReturnValue(hangingSend),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions: [] })
     const first = runtime.send('first')
@@ -776,7 +776,7 @@ describe('createRuntime', () => {
     const relay: Relay = {
       setKey: vi.fn(), hasKey: () => true, clearKey: vi.fn(),
       send: vi.fn().mockResolvedValue({ text: loopResponse }),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions, maxContextDepth: 1 })
     await expect(runtime.send('go')).rejects.toThrow('Max context depth')
@@ -795,7 +795,7 @@ describe('createRuntime', () => {
     const relay: Relay = {
       setKey: vi.fn(), hasKey: () => true, clearKey: vi.fn(),
       send: vi.fn().mockRejectedValue(new Error('network down')),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions: [] })
     await expect(runtime.send('help')).rejects.toThrow('network down')
@@ -811,7 +811,7 @@ describe('createRuntime', () => {
         if (fail) { fail = false; throw new Error('first call fails') }
         return { text: JSON.stringify({ invocations: [] }) }
       }),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions: [] })
     await expect(runtime.send('first')).rejects.toThrow()
@@ -826,7 +826,7 @@ describe('createRuntime', () => {
     const relay: Relay = {
       setKey: vi.fn(), hasKey: () => true, clearKey: vi.fn(),
       send: vi.fn().mockReturnValue(hangingSend),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions: [] })
     const first = runtime.send('first')
@@ -845,7 +845,7 @@ describe('createRuntime', () => {
     const relay: Relay = {
       setKey: vi.fn(), hasKey: () => true, clearKey: vi.fn(),
       send: vi.fn().mockResolvedValue({ text: JSON.stringify({ invocations: [] }), usage: { inputTokens: 100, outputTokens: 40 } }),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions: [] })
     await runtime.send('first')
@@ -858,7 +858,7 @@ describe('createRuntime', () => {
     const relay: Relay = {
       setKey: vi.fn(), hasKey: () => true, clearKey: vi.fn(),
       send: vi.fn().mockResolvedValue({ text: JSON.stringify({ invocations: [] }), usage: { inputTokens: 50, outputTokens: 20 } }),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions: [] })
     await runtime.send('hello')
@@ -870,7 +870,7 @@ describe('createRuntime', () => {
     const relay: Relay = {
       setKey: vi.fn(), hasKey: () => true, clearKey: vi.fn(),
       send: vi.fn().mockResolvedValue({ text: JSON.stringify({ invocations: [] }) }),
-      createFetch: () => vi.fn() as unknown as typeof fetch,
+
     }
     const runtime = createRuntime({ relay, model: MODEL, systemPrompt: '', actions: [] })
     const controller = new AbortController()

@@ -63,10 +63,10 @@ export function createRelay(config: RelayConfig): Relay {
       const blob = loadKeyBlob()
       if (!blob) throw new Error('No API key configured — call setKey first')
 
-      const relayItems: RelayThreadItem[] = items.flatMap(item => {
+      const relayItems: RelayThreadItem[] = items.flatMap((item): RelayThreadItem[] => {
         if (isMessageItem(item)) return [{ from: item.from, body: item.body }]
         const ctx = item.toContext()
-        return ctx !== null ? [{ from: 'context' as const, body: ctx }] : []
+        return ctx !== null ? [{ from: 'context', body: ctx }] : []
       })
 
       return postRelay(endpoint, {
