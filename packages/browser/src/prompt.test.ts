@@ -80,7 +80,7 @@ describe('PROTOCOL_PROMPT', () => {
 
   it('describes all three hook types in order', () => {
     const ui = PROTOCOL_PROMPT.indexOf('UI hooks')
-    const ctx = PROTOCOL_PROMPT.indexOf('Context hooks')
+    const ctx = PROTOCOL_PROMPT.indexOf('context hooks')
     const msg = PROTOCOL_PROMPT.indexOf('Message hooks')
     expect(ui).toBeLessThan(ctx)
     expect(ctx).toBeLessThan(msg)

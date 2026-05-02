@@ -14,8 +14,11 @@ function pemToDer(pem: string): ArrayBuffer {
   return bytes.buffer
 }
 
-export async function fetchPublicKey(endpoint: string): Promise<PublicKeyInfo> {
-  const res = await fetch(`${endpoint}/public-key`)
+export async function fetchPublicKey(
+  endpoint: string,
+  fetchFn: typeof fetch = globalThis.fetch,
+): Promise<PublicKeyInfo> {
+  const res = await fetchFn(`${endpoint}/public-key`)
   if (!res.ok) throw new Error(`fetchPublicKey failed: ${res.status}`)
   const { keyId, publicKeyPem } = await res.json() as { keyId: string; publicKeyPem: string }
   const publicKey = await crypto.subtle.importKey(

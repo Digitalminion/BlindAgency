@@ -1,11 +1,15 @@
-import { encryptApiKey, fetchPublicKey } from './crypto.js'
+import { encryptApiKey as defaultEncryptApiKey, fetchPublicKey as defaultFetchPublicKey } from './crypto.js'
 import { clearKeyBlob, loadKeyBlob, saveKeyBlob } from './storage.js'
+import type { PublicKeyInfo } from './crypto.js'
 
 export type Provider = 'anthropic' | 'openai' | 'gemini'
 
 export interface RelayConfig {
   endpoint: string
   provider?: Provider
+  fetch?: typeof globalThis.fetch
+  fetchPublicKey?: (endpoint: string, fetchFn: typeof fetch) => Promise<PublicKeyInfo>
+  encryptApiKey?: (apiKey: string, publicKey: CryptoKey) => Promise<ArrayBuffer>
 }
 
 export interface Relay {
@@ -16,11 +20,17 @@ export interface Relay {
 }
 
 export function createRelay(config: RelayConfig): Relay {
-  const { endpoint, provider = 'anthropic' } = config
+  const {
+    endpoint,
+    provider = 'anthropic',
+    fetch: fetchFn = globalThis.fetch,
+    fetchPublicKey = defaultFetchPublicKey,
+    encryptApiKey = defaultEncryptApiKey,
+  } = config
 
   return {
     async setKey(apiKey) {
-      const { keyId, publicKey } = await fetchPublicKey(endpoint)
+      const { keyId, publicKey } = await fetchPublicKey(endpoint, fetchFn)
       const encrypted = await encryptApiKey(apiKey, publicKey)
       const bytes = new Uint8Array(encrypted)
       const ciphertext = btoa(String.fromCharCode(...bytes))
@@ -51,7 +61,7 @@ export function createRelay(config: RelayConfig): Relay {
           _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
         }
 
-        return fetch(`${endpoint}/relay`, {
+        return fetchFn(`${endpoint}/relay`, {
           ...(init ?? {}),
           method: 'POST',
           headers: {

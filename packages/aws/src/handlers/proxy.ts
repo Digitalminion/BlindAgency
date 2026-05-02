@@ -26,6 +26,30 @@ const PROVIDER_URLS: Record<string, string> = {
   gemini: 'https://generativelanguage.googleapis.com/v1beta/models:generateContent',
 }
 
+interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+function extractUsage(provider: string, raw: unknown): TokenUsage | null {
+  if (provider === 'anthropic') {
+    const r = raw as { usage?: { input_tokens?: number; output_tokens?: number } }
+    if (!r.usage) return null
+    return { inputTokens: r.usage.input_tokens ?? 0, outputTokens: r.usage.output_tokens ?? 0 }
+  }
+  if (provider === 'openai') {
+    const r = raw as { usage?: { prompt_tokens?: number; completion_tokens?: number } }
+    if (!r.usage) return null
+    return { inputTokens: r.usage.prompt_tokens ?? 0, outputTokens: r.usage.completion_tokens ?? 0 }
+  }
+  if (provider === 'gemini') {
+    const r = raw as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
+    if (!r.usageMetadata) return null
+    return { inputTokens: r.usageMetadata.promptTokenCount ?? 0, outputTokens: r.usageMetadata.candidatesTokenCount ?? 0 }
+  }
+  return null
+}
+
 async function loadKeyEntry(keyId: string): Promise<KeyEntry | null> {
   const [currentRes, previousRes] = await Promise.all([
     ssm.send(new GetParameterCommand({ Name: SSM_CURRENT })).catch(() => null),
@@ -150,9 +174,11 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     }
   }
 
+  const usage = extractUsage(relay.provider, providerData)
+
   return {
     statusCode: 200,
     headers: { ...cors(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(usage !== null && { usage }) }),
   }
 }

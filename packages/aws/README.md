@@ -1,8 +1,10 @@
 # @blindagency/aws
 
-CDK L3 construct that deploys the BlindAgency relay infrastructure to AWS. Wires up an API Gateway HTTP API, three Lambda functions, KMS asymmetric key management, SSM Parameter Store, and an EventBridge rotation schedule — all with least-privilege IAM.
+This package provisions the AWS infrastructure that makes BlindAgency work. Drop `BlindAgencyConstruct` into your CDK stack and it wires up everything the relay needs: an HTTP API, three Lambda functions, asymmetric KMS key management, SSM Parameter Store for key distribution, and an EventBridge schedule that rotates the key pair automatically.
 
-Used alongside [`@blindagency/browser`](https://www.npmjs.com/package/@blindagency/browser), which handles client-side key encryption and the agent runtime.
+The relay's job is narrow and deliberate. It receives an encrypted API key blob from the browser, uses KMS to decrypt it in memory, forwards the LLM request to the appropriate provider, and returns a normalized `{ text }` response. It has no database, no persistent state, and no mechanism to log or store the plaintext key. The architecture is designed so that you can truthfully tell users: *we do not store your API key and our infrastructure has no way to do so.*
+
+Used alongside [`@blindagency/browser`](https://www.npmjs.com/package/@blindagency/browser), which handles client-side encryption and the agent runtime.
 
 ## Install
 
@@ -33,12 +35,10 @@ const relay = new BlindAgencyConstruct(stack, 'Relay', {
   rotationInterval: Duration.hours(1), // optional, default 1 hour
 })
 
-// Pass these to your frontend config
+// Pass these URLs to your frontend configuration
 console.log(relay.apiUrl)        // https://{id}.execute-api.{region}.amazonaws.com
 console.log(relay.publicKeyUrl)  // https://{id}.execute-api.{region}.amazonaws.com/public-key
 ```
-
-## Connecting to the browser package
 
 After `cdk deploy`, pass `relay.apiUrl` as the `endpoint` to `createRelay` in `@blindagency/browser`:
 
@@ -46,72 +46,74 @@ After `cdk deploy`, pass `relay.apiUrl` as the `endpoint` to `createRelay` in `@
 import { createRelay } from '@blindagency/browser'
 
 const relay = createRelay({
-  endpoint: 'https://{id}.execute-api.{region}.amazonaws.com', // relay.apiUrl from CDK output
+  endpoint: relay.apiUrl,
   provider: 'anthropic',
 })
 
 await relay.setKey(userApiKey)
 ```
 
-The browser package handles key encryption, session storage, and the agent runtime. This package only handles the AWS infrastructure.
-
 ## What gets deployed
+
+Three Lambdas serve distinct roles and are granted only the permissions they need.
 
 | Resource | Purpose |
 |----------|---------|
-| `GET /public-key` Lambda | Returns the current `{ keyId, publicKeyPem }` for client-side encryption |
+| `GET /public-key` Lambda | Returns `{ keyId, publicKeyPem }` — the current RSA public key for client-side encryption |
 | `POST /relay` Lambda | Decrypts the API key via KMS, forwards the request to the LLM provider, returns `{ text }` |
-| Rotation Lambda | Creates a new KMS RSA-2048 key pair on schedule, rotates SSM entries, schedules deletion of the old key |
-| KMS asymmetric key | RSA-OAEP key pair — private key never leaves KMS |
-| SSM Parameter Store | Stores `current` and `previous` key entries (`{ keyId, keyArn, publicKeyPem }`) |
+| Rotation Lambda | Creates a new KMS RSA-2048 key pair on schedule, updates SSM, schedules deletion of the old key |
+| KMS asymmetric key | RSA-OAEP key pair — the private key never leaves KMS |
+| SSM Parameter Store | Holds `current` and `previous` key entries (`{ keyId, keyArn, publicKeyPem }`) |
 | EventBridge rule | Triggers the rotation Lambda on the configured interval |
-| CloudFormation Custom Resource | Invokes the rotation Lambda once on first deploy so the endpoint is live immediately |
+| CloudFormation Custom Resource | Invokes the rotation Lambda once on first deploy so a valid key pair exists immediately |
 
 ## Props
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `providers` | `('anthropic' \| 'openai' \| 'gemini')[]` | Yes | — | LLM providers the relay will accept requests for |
-| `corsOrigins` | `string[]` | Yes | — | Origins allowed by CORS. Pass `['*']` for development only. |
+| `corsOrigins` | `string[]` | Yes | — | Allowed CORS origins. Use `['*']` for development only. |
 | `rotationInterval` | `Duration` | No | `Duration.hours(1)` | How often to rotate the KMS key pair |
-| `maxConcurrency` | `number` | No | `10` | Reserved concurrent executions for the relay Lambda. Prevents the relay from being used as an open LLM proxy at scale and limits blast radius if credentials are stolen. |
+| `maxConcurrency` | `number` | No | `10` | Reserved concurrent executions on the relay Lambda. Caps scale and limits blast radius if credentials are stolen. |
 
 ## Outputs
 
 | Property | Description |
 |----------|-------------|
-| `apiUrl` | Base URL of the HTTP API — pass to `createRelay({ endpoint })` in `@blindagency/browser` |
+| `apiUrl` | Base URL of the HTTP API — pass to `createRelay({ endpoint })` |
 | `publicKeyUrl` | Full URL of the `GET /public-key` endpoint |
 
 ## Security
 
-**KMS key permissions are tag-scoped.** The rotation Lambda can only create keys that carry the `Application: BlindAgency` tag (`aws:RequestTag` condition), and can only manage keys that already carry that tag (`aws:ResourceTag` condition). The relay Lambda can only decrypt using tagged keys. This means the IAM policies are bounded even though they target `resources: ['*']` — they cannot touch any KMS key in your account that was not created by this construct.
+**KMS permissions are tag-scoped.** The rotation Lambda can only create KMS keys tagged `Application: BlindAgency` (enforced by `aws:RequestTag`), and can only manage keys that already carry that tag (enforced by `aws:ResourceTag`). The relay Lambda can only decrypt with tagged keys. This means the IAM policies are bounded even though they reference `resources: ['*']` — they cannot touch any key in your account that this construct did not create.
 
-**CloudTrail data events are not configured by this construct.** If your account has CloudTrail data events enabled at the account level, KMS decrypt calls and SSM parameter reads will appear in those logs. The logs contain only key metadata (`keyId`, parameter names) — not plaintext key material — but you should be aware of this if you operate in an audited environment. This is an account-level concern, not something this construct can suppress.
+**The proxy Lambda runs at WARN log level.** The Lambda runtime emits `START`, `END`, and `REPORT` lines at INFO by default — suppressed here so that nothing is written to CloudWatch for a normal successful invocation. The log group exists but stays empty under normal operation.
+
+**The proxy log group is KMS-encrypted.** A dedicated log encryption key ensures that if anything were ever logged (an error, for example), it would be unreadable without the encryption key. The log group has a one-day retention policy.
 
 **The decrypted API key exists in Lambda memory only for the duration of request construction.** The handler nulls both the key variable and the headers reference before the provider `fetch` is awaited. It is never logged, written to storage, or included in any response.
 
-**Key rotation grace window.** When a new key pair is created, the previous key remains valid in SSM for the duration of one rotation interval — long enough for any in-flight browser sessions to complete. The old KMS key is then scheduled for deletion with a 7-day pending window (KMS minimum). Access is cut off at the SSM layer well before the KMS deletion fires.
+**Key rotation grace window.** When a new key pair is created, the previous key remains valid in SSM for one full rotation interval — long enough for any in-flight browser sessions to complete their current request. The old KMS key is then scheduled for deletion with a 7-day pending window (the KMS minimum). Access is cut off at the SSM layer well before the KMS deletion fires.
+
+**CloudTrail data events are not configured by this construct.** If your account has CloudTrail data events enabled at the account level, KMS decrypt calls and SSM parameter reads will appear in those logs. Those logs contain only key metadata — `keyId`, parameter names — not plaintext key material. Worth being aware of in an audited environment; not something this construct can suppress.
+
+**Access logging on the HTTP API is intentionally disabled.** API Gateway access logs include request metadata but not bodies. Disabling them removes any path by which request-level metadata could be written to a persistent store.
 
 ## Limitations
 
-This construct meaningfully reduces the risk surface around API key handling, but it is important to understand what it does and does not guarantee.
-
 **What the architecture prevents:**
 - The relay cannot persist keys — there is no database, no logging path, and no code that writes the decrypted key anywhere
-- A breach of the SSM parameters exposes only key metadata (`keyArn`, `keyId`) — the private key material never leaves KMS
-- Key rotation limits the blast radius of a compromised key to a single rotation window
+- A breach of SSM exposes only key metadata (`keyArn`, `keyId`) — the private key material never leaves KMS
+- Key rotation limits the blast radius of a compromised session to a single rotation window
 
 **What the architecture does not prevent:**
-- A compromised Lambda execution environment — if an attacker has arbitrary code execution in the relay Lambda, they can read the decrypted key from memory during request construction. The architecture minimizes the exposure window; it does not eliminate the Lambda as a trust boundary.
-- A compromised AWS account — if your AWS account credentials are stolen, all bets are off regardless of this construct
-- Provider-side exposure — once the request reaches Anthropic, OpenAI, or Gemini, it is subject to their data handling policies
-
-The relay is designed to let you truthfully say to users: *we do not store your API key and our infrastructure has no mechanism to do so*. It is not designed for adversarial contexts where the infrastructure itself may be compromised.
+- A compromised Lambda execution environment — if an attacker achieves arbitrary code execution inside the relay Lambda, they can read the decrypted key from memory. The architecture minimizes the window; it cannot eliminate the Lambda as a trust boundary.
+- A compromised AWS account — if your account credentials are stolen, all bets are off regardless of this construct.
+- Provider-side exposure — once the request reaches Anthropic, OpenAI, or Gemini, it is subject to their data handling policies.
 
 ## How the relay handles providers
 
-The relay accepts a `provider` field in each request (set by `@blindagency/browser` via `createRelay({ provider })`). It routes to the appropriate API endpoint, sets the correct authentication headers for that provider, and normalizes the response to `{ text: string }` before returning it to the browser. The browser runtime has no provider-specific logic.
+The relay reads the `provider` field set by `@blindagency/browser`, routes to the appropriate API endpoint, sets the correct authentication headers, and normalizes the response to `{ text: string }` before returning it. The browser runtime has no provider-specific logic.
 
 | Provider | Endpoint |
 |----------|----------|
@@ -122,3 +124,7 @@ The relay accepts a `provider` field in each request (set by `@blindagency/brows
 ## Protocol enforcement
 
 If the LLM returns a response that is not valid JSON, the relay returns `422` with `{ error: 'PROTOCOL_VIOLATION' }` rather than forwarding malformed data to the browser. This catches cases where the model drifts off the structured response protocol before the browser runtime attempts to parse the response.
+
+## License
+
+Apache-2.0
