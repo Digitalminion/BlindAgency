@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { fetchPublicKey, encryptApiKey } from './crypto.js'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { importPublicKey, encryptApiKey } from './crypto.js'
 
 // One RSA-OAEP key pair shared across all tests — keygen is ~200-400ms.
 let keyPair: CryptoKeyPair
@@ -17,50 +17,23 @@ beforeAll(async () => {
   publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----`
 })
 
-function makeFetch(keyId = 'key-1', pem = publicKeyPem): typeof fetch {
-  return vi.fn().mockResolvedValue({
-    ok: true,
-    json: async () => ({ keyId, publicKeyPem: pem }),
-  }) as unknown as typeof fetch
-}
+// ── importPublicKey ────────────────────────────────────────────────────────
 
-// ── fetchPublicKey ─────────────────────────────────────────────────────────
-
-describe('fetchPublicKey', () => {
-  it('calls the /public-key path on the given endpoint', async () => {
-    const fetchFn = makeFetch()
-    await fetchPublicKey('https://relay.example.com', fetchFn)
-    expect(vi.mocked(fetchFn)).toHaveBeenCalledWith('https://relay.example.com/public-key')
-  })
-
-  it('returns the keyId from the response', async () => {
-    const result = await fetchPublicKey('https://example.com', makeFetch('key-abc'))
-    expect(result.keyId).toBe('key-abc')
-  })
-
-  it('returns a CryptoKey', async () => {
-    const result = await fetchPublicKey('https://example.com', makeFetch())
-    expect(result.publicKey).toBeInstanceOf(CryptoKey)
+describe('importPublicKey', () => {
+  it('returns a CryptoKey from a valid PEM', async () => {
+    expect(await importPublicKey(publicKeyPem)).toBeInstanceOf(CryptoKey)
   })
 
   it('imported key has encrypt usage only', async () => {
-    const { publicKey } = await fetchPublicKey('https://example.com', makeFetch())
-    expect(publicKey.usages).toEqual(['encrypt'])
+    expect((await importPublicKey(publicKeyPem)).usages).toEqual(['encrypt'])
   })
 
   it('imported key is non-extractable', async () => {
-    const { publicKey } = await fetchPublicKey('https://example.com', makeFetch())
-    expect(publicKey.extractable).toBe(false)
+    expect((await importPublicKey(publicKeyPem)).extractable).toBe(false)
   })
 
-  it('throws when the response is not ok', async () => {
-    const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 503 }) as unknown as typeof fetch
-    await expect(fetchPublicKey('https://example.com', fetchFn)).rejects.toThrow('503')
-  })
-
-  it('propagates a network-level fetch rejection', async () => {
-    const fetchFn = vi.fn().mockRejectedValue(new Error('network down')) as unknown as typeof fetch
-    await expect(fetchPublicKey('https://example.com', fetchFn)).rejects.toThrow('network down')
+  it('throws on an invalid PEM string', async () => {
+    await expect(importPublicKey('not a real pem')).rejects.toThrow()
   })
 })
 

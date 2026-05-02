@@ -1,4 +1,5 @@
-import { encryptApiKey as defaultEncryptApiKey, fetchPublicKey as defaultFetchPublicKey } from './crypto.js'
+import { getPublicKey, postRelay, RELAY_PATH } from './api.js'
+import { importPublicKey, encryptApiKey as defaultEncryptApiKey } from './crypto.js'
 import { clearKeyBlob, loadKeyBlob, saveKeyBlob } from './storage.js'
 import { threadToLlmMessages } from './thread.js'
 import type { PublicKeyInfo } from './crypto.js'
@@ -33,8 +34,12 @@ export function createRelay(config: RelayConfig): Relay {
     endpoint,
     provider = 'anthropic',
     fetch: fetchFn = globalThis.fetch,
-    fetchPublicKey = defaultFetchPublicKey,
     encryptApiKey = defaultEncryptApiKey,
+    fetchPublicKey = async (ep, fn) => {
+      const { keyId, publicKeyPem } = await getPublicKey(ep, fn)
+      const publicKey = await importPublicKey(publicKeyPem)
+      return { keyId, publicKey }
+    },
   } = config
 
   return {
@@ -63,26 +68,12 @@ export function createRelay(config: RelayConfig): Relay {
         ...additions.map(content => ({ role: 'user' as const, content })),
       ]
 
-      const res = await fetchFn(`${endpoint}/relay`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          system,
-          messages,
-          _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
-        }),
-        signal,
-      })
-
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(`LLM request failed ${res.status}: ${text}`)
-      }
-
-      const data = await res.json() as { text: string; usage?: TokenUsage }
-      if (typeof data.text !== 'string') throw new Error('Relay response missing "text" field')
-      return { text: data.text, usage: data.usage }
+      return postRelay(endpoint, {
+        model,
+        system,
+        messages,
+        _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
+      }, fetchFn, signal)
     },
 
     createFetch() {
@@ -101,7 +92,7 @@ export function createRelay(config: RelayConfig): Relay {
           _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
         }
 
-        return fetchFn(`${endpoint}/relay`, {
+        return fetchFn(`${endpoint}${RELAY_PATH}`, {
           ...(init ?? {}),
           method: 'POST',
           headers: {

@@ -14,21 +14,14 @@ function pemToDer(pem: string): ArrayBuffer {
   return bytes.buffer
 }
 
-export async function fetchPublicKey(
-  endpoint: string,
-  fetchFn: typeof fetch = globalThis.fetch,
-): Promise<PublicKeyInfo> {
-  const res = await fetchFn(`${endpoint}/public-key`)
-  if (!res.ok) throw new Error(`fetchPublicKey failed: ${res.status}`)
-  const { keyId, publicKeyPem } = await res.json() as { keyId: string; publicKeyPem: string }
-  const publicKey = await crypto.subtle.importKey(
+export async function importPublicKey(pem: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
     'spki',
-    pemToDer(publicKeyPem),
+    pemToDer(pem),
     { name: 'RSA-OAEP', hash: 'SHA-256' },
     false,
     ['encrypt'],
   )
-  return { keyId, publicKey }
 }
 
 export async function encryptApiKey(apiKey: string, publicKey: CryptoKey): Promise<ArrayBuffer> {
