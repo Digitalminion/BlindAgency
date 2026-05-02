@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createThread, createMessageItem, threadToLlmMessages, isMessageItem } from './thread.js'
+import { createThread, createMessageItem, isMessageItem } from './thread.js'
 import type { ThreadItem } from './thread.js'
 
 // ── createThread ──────────────────────────────────────────────────────────
@@ -136,44 +136,3 @@ describe('isMessageItem', () => {
   })
 })
 
-// ── threadToLlmMessages ───────────────────────────────────────────────────
-
-describe('threadToLlmMessages', () => {
-  it('converts user MessageItems to role:user messages', () => {
-    const items = [createMessageItem('user', 'hello')]
-    expect(threadToLlmMessages(items)).toEqual([{ role: 'user', content: 'hello' }])
-  })
-
-  it('converts agent MessageItems to role:assistant messages', () => {
-    const items = [createMessageItem('agent', 'reply')]
-    expect(threadToLlmMessages(items)).toEqual([{ role: 'assistant', content: 'reply' }])
-  })
-
-  it('injects non-null toContext results as role:user messages', () => {
-    const items: ThreadItem[] = [{ id: 'x', toContext: () => '[Card — saved]\nsome context' }]
-    expect(threadToLlmMessages(items)).toEqual([{ role: 'user', content: '[Card — saved]\nsome context' }])
-  })
-
-  it('skips items where toContext returns null and kind is not message', () => {
-    const items: ThreadItem[] = [{ id: 'x', toContext: () => null }]
-    expect(threadToLlmMessages(items)).toHaveLength(0)
-  })
-
-  it('preserves item order across mixed types', () => {
-    const items: ThreadItem[] = [
-      createMessageItem('user', 'hi'),
-      { id: 'ctx', toContext: () => '[Card — confirmed]\nworkspace: acme' },
-      createMessageItem('agent', 'got it'),
-    ]
-    const messages = threadToLlmMessages(items)
-    expect(messages).toEqual([
-      { role: 'user', content: 'hi' },
-      { role: 'user', content: '[Card — confirmed]\nworkspace: acme' },
-      { role: 'assistant', content: 'got it' },
-    ])
-  })
-
-  it('returns empty array for empty items', () => {
-    expect(threadToLlmMessages([])).toEqual([])
-  })
-})

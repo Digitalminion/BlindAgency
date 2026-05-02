@@ -44,7 +44,8 @@ describe('getPublicKey', () => {
 const REQUEST: RelayRequest = {
   model: 'test-model',
   system: 'Be helpful.',
-  messages: [{ role: 'user', content: 'hello' }],
+  items: [{ from: 'user', body: 'hello' }],
+  additions: [],
   _relay: { keyId: 'k', ciphertext: 'c', provider: 'anthropic' },
 }
 
@@ -74,7 +75,8 @@ describe('postRelay', () => {
     const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
     expect(body.model).toBe('test-model')
     expect(body.system).toBe('Be helpful.')
-    expect(body.messages).toEqual([{ role: 'user', content: 'hello' }])
+    expect(body.items).toEqual([{ from: 'user', body: 'hello' }])
+    expect(body.additions).toEqual([])
     expect(body._relay).toEqual({ keyId: 'k', ciphertext: 'c', provider: 'anthropic' })
   })
 

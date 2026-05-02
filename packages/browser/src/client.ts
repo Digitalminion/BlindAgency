@@ -1,8 +1,9 @@
 import { getPublicKey, postRelay, RELAY_PATH } from './api.js'
 import { importPublicKey, encryptApiKey as defaultEncryptApiKey } from './crypto.js'
 import { clearKeyBlob, loadKeyBlob, saveKeyBlob } from './storage.js'
-import { threadToLlmMessages } from './thread.js'
+import { isMessageItem } from './thread.js'
 import type { PublicKeyInfo } from './crypto.js'
+import type { RelayThreadItem } from './api.js'
 import type { ThreadItem, TokenUsage } from './thread.js'
 
 export type Provider = 'anthropic' | 'openai' | 'gemini'
@@ -63,15 +64,17 @@ export function createRelay(config: RelayConfig): Relay {
       const blob = loadKeyBlob()
       if (!blob) throw new Error('No API key configured — call setKey first')
 
-      const messages = [
-        ...threadToLlmMessages(items),
-        ...additions.map(content => ({ role: 'user' as const, content })),
-      ]
+      const relayItems: RelayThreadItem[] = items.flatMap(item => {
+        if (isMessageItem(item)) return [{ from: item.from, body: item.body }]
+        const ctx = item.toContext()
+        return ctx !== null ? [{ from: 'context' as const, body: ctx }] : []
+      })
 
       return postRelay(endpoint, {
         model,
         system,
-        messages,
+        items: relayItems,
+        additions,
         _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
       }, fetchFn, signal)
     },

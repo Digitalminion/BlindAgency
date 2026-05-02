@@ -2,7 +2,7 @@ import { DecryptCommand, KMSClient } from '@aws-sdk/client-kms'
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm'
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda'
 import { ADAPTERS } from './providers.js'
-import type { CanonicalRequest } from './providers.js'
+import type { CanonicalMessage, CanonicalRequest } from './providers.js'
 
 const kms = new KMSClient({})
 const ssm = new SSMClient({})
@@ -20,6 +20,11 @@ interface RelayMeta {
   keyId: string
   ciphertext: string
   provider: string
+}
+
+interface RelayItem {
+  from: 'user' | 'agent' | 'context'
+  body: string
 }
 
 async function loadKeyEntry(keyId: string): Promise<KeyEntry | null> {
@@ -85,8 +90,18 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   let headers: Record<string, string> | null = adapter.buildHeaders(apiKey)
   apiKey = null
 
-  const { _relay: _removed, ...canonical } = body
-  const req = canonical as CanonicalRequest
+  const { _relay: _removed, model, system, items = [], additions = [] } =
+    body as { _relay: RelayMeta; model: string; system: string; items: RelayItem[]; additions: string[] }
+
+  const messages: CanonicalMessage[] = [
+    ...(items as RelayItem[]).map(item => ({
+      role: (item.from === 'agent' ? 'assistant' : 'user') as CanonicalMessage['role'],
+      content: item.body,
+    })),
+    ...additions.map(content => ({ role: 'user' as const, content })),
+  ]
+
+  const req: CanonicalRequest = { model, system, messages }
   const requestBody = JSON.stringify(adapter.buildRequestBody(req))
 
   const providerRes = await fetch(adapter.buildUrl(req.model), { method: 'POST', headers, body: requestBody })

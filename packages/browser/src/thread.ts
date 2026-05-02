@@ -3,13 +3,6 @@ export interface TokenUsage {
   outputTokens: number
 }
 
-export type ThreadMessageRole = 'user' | 'assistant'
-
-export interface ThreadMessage {
-  role: ThreadMessageRole
-  content: string
-}
-
 export interface ThreadItem {
   readonly id: string
   toContext(): string | null
@@ -59,15 +52,3 @@ export function createThread(): Thread {
   }
 }
 
-// Converts thread items into the ThreadMessage[] the LLM sees.
-// MessageItems become role/content pairs. All other items inject their
-// toContext() result as a user message at the point they appear in the thread.
-export function threadToLlmMessages(items: readonly ThreadItem[]): ThreadMessage[] {
-  return items.flatMap(item => {
-    if (isMessageItem(item)) {
-      return [{ role: item.from === 'agent' ? 'assistant' as const : 'user' as const, content: item.body }]
-    }
-    const ctx = item.toContext()
-    return ctx !== null ? [{ role: 'user' as const, content: ctx }] : []
-  })
-}

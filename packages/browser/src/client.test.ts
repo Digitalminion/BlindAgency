@@ -212,7 +212,7 @@ describe('send()', () => {
     await expect(relay.send('m', 's', [])).rejects.toThrow('No API key')
   })
 
-  it('posts model, system, and translated items to {endpoint}/relay', async () => {
+  it('posts model, system, items, and additions to {endpoint}/relay', async () => {
     store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
     const fetchFn = mockSendFetch({ text: '{}' })
     const relay = makeSendRelay(fetchFn)
@@ -223,38 +223,37 @@ describe('send()', () => {
     expect(url).toBe(`${ENDPOINT}/relay`)
     expect(body.model).toBe('claude-3')
     expect(body.system).toBe('Be helpful.')
-    expect(body.messages).toEqual([
-      { role: 'user', content: 'hello' },
-      { role: 'assistant', content: 'hi' },
+    expect(body.items).toEqual([
+      { from: 'user', body: 'hello' },
+      { from: 'agent', body: 'hi' },
     ])
+    expect(body.additions).toEqual([])
   })
 
-  it('maps agent items to assistant role', async () => {
+  it('preserves from: agent on agent items — role mapping is the relay handler\'s concern', async () => {
     store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
     const fetchFn = mockSendFetch({ text: '{}' })
     await makeSendRelay(fetchFn).send('m', 's', [createMessageItem('agent', 'reply')])
     const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
-    expect(body.messages[0]).toEqual({ role: 'assistant', content: 'reply' })
+    expect(body.items[0]).toEqual({ from: 'agent', body: 'reply' })
   })
 
-  it('appends string additions as user messages after thread items', async () => {
+  it('sends additions as a separate array alongside items', async () => {
     store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
     const fetchFn = mockSendFetch({ text: '{}' })
     await makeSendRelay(fetchFn).send('m', 's', [createMessageItem('user', 'hi')], ['[Reasoning]\nthink', '[Context]\ndata'])
     const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
-    expect(body.messages).toEqual([
-      { role: 'user', content: 'hi' },
-      { role: 'user', content: '[Reasoning]\nthink' },
-      { role: 'user', content: '[Context]\ndata' },
-    ])
+    expect(body.items).toEqual([{ from: 'user', body: 'hi' }])
+    expect(body.additions).toEqual(['[Reasoning]\nthink', '[Context]\ndata'])
   })
 
-  it('sends empty messages when items and additions are both empty', async () => {
+  it('sends empty items and additions when both are empty', async () => {
     store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
     const fetchFn = mockSendFetch({ text: '{}' })
     await makeSendRelay(fetchFn).send('m', 's', [])
     const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
-    expect(body.messages).toEqual([])
+    expect(body.items).toEqual([])
+    expect(body.additions).toEqual([])
   })
 
   it('includes _relay metadata with keyId, ciphertext, and provider', async () => {

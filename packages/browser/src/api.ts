@@ -8,10 +8,16 @@ export interface PublicKeyData {
   publicKeyPem: string
 }
 
+export interface RelayThreadItem {
+  from: 'user' | 'agent' | 'context'
+  body: string
+}
+
 export interface RelayRequest {
   model: string
   system: string
-  messages: Array<{ role: string; content: string }>
+  items: RelayThreadItem[]
+  additions: string[]
   _relay: { keyId: string; ciphertext: string; provider: string }
 }
 
