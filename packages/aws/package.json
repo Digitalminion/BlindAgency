@@ -1,0 +1,37 @@
+{
+  "name": "@blindagency/aws",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/build-handlers.mjs",
+    "pretest": "node scripts/build-handlers.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.0.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-kms": "^3.0.0",
+    "@aws-sdk/client-ssm": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^22.0.0",
+    "aws-cdk-lib": "^2.177.0",
+    "constructs": "^10.4.2",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.0"
+  }
+}

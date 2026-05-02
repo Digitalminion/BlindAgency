@@ -1,0 +1,42 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      - name: Build packages
+        run: |
+          npm run build --workspace packages/browser
+          npm run build --workspace packages/aws
+
+      - name: Test packages
+        run: |
+          npm test --workspace packages/browser
+          npm test --workspace packages/aws
+
+      - name: Publish @blindagency/browser
+        run: npm publish --workspace packages/browser
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @blindagency/aws
+        run: npm publish --workspace packages/aws
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
