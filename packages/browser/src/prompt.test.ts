@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { buildSystemPrompt } from './prompt.js'
 import { PROTOCOL_PROMPT } from './runtime.js'
-import type { HookDefinition } from './hooks.js'
+import type { ActionDefinition } from './actions.js'
 
 const noop = () => {}
 
-const msgHook: HookDefinition = {
+const msgAction: ActionDefinition = {
   name: 'send-message',
   type: 'message',
   description: 'Send a text reply to the user.',
@@ -13,14 +13,14 @@ const msgHook: HookDefinition = {
   handler: noop,
 }
 
-const ctxHook: HookDefinition = {
+const ctxAction: ActionDefinition = {
   name: 'get-pricing',
   type: 'context',
   description: 'Fetch current pricing tiers.',
   handler: noop,
 }
 
-const uiHook: HookDefinition = {
+const uiAction: ActionDefinition = {
   name: 'update-visualization',
   type: 'ui',
   description: 'Update the page visualization.',
@@ -30,41 +30,41 @@ const uiHook: HookDefinition = {
 
 describe('buildSystemPrompt', () => {
   it('includes the base prompt', () => {
-    const result = buildSystemPrompt({ base: 'You are a helpful assistant.', hooks: [] })
+    const result = buildSystemPrompt({ base: 'You are a helpful assistant.', actions: [] })
     expect(result).toContain('You are a helpful assistant.')
   })
 
   it('does not include the protocol section — runtime adds it', () => {
-    const result = buildSystemPrompt({ base: '', hooks: [] })
+    const result = buildSystemPrompt({ base: '', actions: [] })
     expect(result).not.toContain('"invocations"')
   })
 
-  it('groups hooks by type with correct section headers', () => {
-    const result = buildSystemPrompt({ base: '', hooks: [msgHook, ctxHook, uiHook] })
-    expect(result).toContain('Message Hooks')
-    expect(result).toContain('Context Hooks')
-    expect(result).toContain('UI Hooks')
+  it('groups actions by type with correct section headers', () => {
+    const result = buildSystemPrompt({ base: '', actions: [msgAction, ctxAction, uiAction] })
+    expect(result).toContain('Message Actions')
+    expect(result).toContain('Context Actions')
+    expect(result).toContain('UI Actions')
   })
 
-  it('includes hook names and descriptions', () => {
-    const result = buildSystemPrompt({ base: '', hooks: [msgHook] })
+  it('includes action names and descriptions', () => {
+    const result = buildSystemPrompt({ base: '', actions: [msgAction] })
     expect(result).toContain('send-message')
     expect(result).toContain('Send a text reply to the user.')
   })
 
   it('includes serialized params schema when provided', () => {
-    const result = buildSystemPrompt({ base: '', hooks: [msgHook] })
+    const result = buildSystemPrompt({ base: '', actions: [msgAction] })
     expect(result).toContain('"required"')
   })
 
-  it('omits type sections when no hooks of that type exist', () => {
-    const result = buildSystemPrompt({ base: '', hooks: [msgHook] })
-    expect(result).not.toContain('Context Hooks')
-    expect(result).not.toContain('UI Hooks')
+  it('omits type sections when no actions of that type exist', () => {
+    const result = buildSystemPrompt({ base: '', actions: [msgAction] })
+    expect(result).not.toContain('Context Actions')
+    expect(result).not.toContain('UI Actions')
   })
 
-  it('context hook section explains re-invocation', () => {
-    const result = buildSystemPrompt({ base: '', hooks: [ctxHook] })
+  it('context action section explains re-invocation', () => {
+    const result = buildSystemPrompt({ base: '', actions: [ctxAction] })
     expect(result).toContain('re-invoke')
   })
 })
@@ -78,10 +78,10 @@ describe('PROTOCOL_PROMPT', () => {
     expect(PROTOCOL_PROMPT).toContain('valid JSON')
   })
 
-  it('describes all three hook types in order', () => {
-    const ui = PROTOCOL_PROMPT.indexOf('UI hooks')
-    const ctx = PROTOCOL_PROMPT.indexOf('context hooks')
-    const msg = PROTOCOL_PROMPT.indexOf('Message hooks')
+  it('describes all three action types in order', () => {
+    const ui = PROTOCOL_PROMPT.indexOf('UI actions')
+    const ctx = PROTOCOL_PROMPT.indexOf('context actions')
+    const msg = PROTOCOL_PROMPT.indexOf('Message actions')
     expect(ui).toBeLessThan(ctx)
     expect(ctx).toBeLessThan(msg)
   })

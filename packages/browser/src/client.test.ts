@@ -188,3 +188,117 @@ describe('setKey', () => {
     expect(calls).toEqual(['https://my-relay.example.com'])
   })
 })
+
+// ── send() ─────────────────────────────────────────────────────────────────
+
+import { createMessageItem } from './thread.js'
+
+function makeSendRelay(fetchFn: typeof fetch) {
+  return createRelay({ endpoint: ENDPOINT, provider: 'anthropic', fetch: fetchFn })
+}
+
+function mockSendFetch(body: object, ok = true): typeof fetch {
+  return vi.fn().mockResolvedValue({
+    ok,
+    status: ok ? 200 : 500,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  }) as unknown as typeof fetch
+}
+
+describe('send()', () => {
+  it('throws when no key is configured', async () => {
+    const relay = makeSendRelay(mockSendFetch({ text: '{}' }))
+    await expect(relay.send('m', 's', [])).rejects.toThrow('No API key')
+  })
+
+  it('posts model, system, and translated items to {endpoint}/relay', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    const fetchFn = mockSendFetch({ text: '{}' })
+    const relay = makeSendRelay(fetchFn)
+    const items = [createMessageItem('user', 'hello'), createMessageItem('agent', 'hi')]
+    await relay.send('claude-3', 'Be helpful.', items)
+    const [url, init] = vi.mocked(fetchFn).mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(url).toBe(`${ENDPOINT}/relay`)
+    expect(body.model).toBe('claude-3')
+    expect(body.system).toBe('Be helpful.')
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' },
+    ])
+  })
+
+  it('maps agent items to assistant role', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    const fetchFn = mockSendFetch({ text: '{}' })
+    await makeSendRelay(fetchFn).send('m', 's', [createMessageItem('agent', 'reply')])
+    const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
+    expect(body.messages[0]).toEqual({ role: 'assistant', content: 'reply' })
+  })
+
+  it('appends string additions as user messages after thread items', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    const fetchFn = mockSendFetch({ text: '{}' })
+    await makeSendRelay(fetchFn).send('m', 's', [createMessageItem('user', 'hi')], ['[Reasoning]\nthink', '[Context]\ndata'])
+    const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'user', content: '[Reasoning]\nthink' },
+      { role: 'user', content: '[Context]\ndata' },
+    ])
+  })
+
+  it('sends empty messages when items and additions are both empty', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    const fetchFn = mockSendFetch({ text: '{}' })
+    await makeSendRelay(fetchFn).send('m', 's', [])
+    const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
+    expect(body.messages).toEqual([])
+  })
+
+  it('includes _relay metadata with keyId, ciphertext, and provider', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'my-key', ciphertext: 'my-ct' })
+    const fetchFn = mockSendFetch({ text: '{}' })
+    await makeSendRelay(fetchFn).send('m', 's', [])
+    const body = JSON.parse((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).body as string)
+    expect(body._relay).toEqual({ keyId: 'my-key', ciphertext: 'my-ct', provider: 'anthropic' })
+  })
+
+  it('returns text and usage from the response', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    const result = await makeSendRelay(
+      mockSendFetch({ text: '{"invocations":[]}', usage: { inputTokens: 100, outputTokens: 40 } })
+    ).send('m', 's', [])
+    expect(result.text).toBe('{"invocations":[]}')
+    expect(result.usage).toEqual({ inputTokens: 100, outputTokens: 40 })
+  })
+
+  it('returns undefined usage when relay omits it', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    const result = await makeSendRelay(mockSendFetch({ text: '{}' })).send('m', 's', [])
+    expect(result.usage).toBeUndefined()
+  })
+
+  it('throws on a non-ok relay response', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    await expect(
+      makeSendRelay(mockSendFetch({ error: 'rate limited' }, false)).send('m', 's', [])
+    ).rejects.toThrow('500')
+  })
+
+  it('throws when the relay response is missing the text field', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    await expect(
+      makeSendRelay(mockSendFetch({ result: 'oops' })).send('m', 's', [])
+    ).rejects.toThrow('"text"')
+  })
+
+  it('forwards AbortSignal to fetch', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
+    const fetchFn = mockSendFetch({ text: '{}' })
+    const signal = new AbortController().signal
+    await makeSendRelay(fetchFn).send('m', 's', [], [], signal)
+    expect((vi.mocked(fetchFn).mock.calls[0][1] as RequestInit).signal).toBe(signal)
+  })
+})

@@ -1,6 +1,8 @@
 import { encryptApiKey as defaultEncryptApiKey, fetchPublicKey as defaultFetchPublicKey } from './crypto.js'
 import { clearKeyBlob, loadKeyBlob, saveKeyBlob } from './storage.js'
+import { threadToLlmMessages } from './thread.js'
 import type { PublicKeyInfo } from './crypto.js'
+import type { ThreadItem, TokenUsage } from './thread.js'
 
 export type Provider = 'anthropic' | 'openai' | 'gemini'
 
@@ -16,6 +18,13 @@ export interface Relay {
   setKey(apiKey: string): Promise<void>
   hasKey(): boolean
   clearKey(): void
+  send(
+    model: string,
+    system: string,
+    items: readonly ThreadItem[],
+    additions?: string[],
+    signal?: AbortSignal,
+  ): Promise<{ text: string; usage?: TokenUsage }>
   createFetch(): typeof fetch
 }
 
@@ -43,6 +52,37 @@ export function createRelay(config: RelayConfig): Relay {
 
     clearKey() {
       clearKeyBlob()
+    },
+
+    async send(model, system, items, additions = [], signal) {
+      const blob = loadKeyBlob()
+      if (!blob) throw new Error('No API key configured — call setKey first')
+
+      const messages = [
+        ...threadToLlmMessages(items),
+        ...additions.map(content => ({ role: 'user' as const, content })),
+      ]
+
+      const res = await fetchFn(`${endpoint}/relay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          system,
+          messages,
+          _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
+        }),
+        signal,
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`LLM request failed ${res.status}: ${text}`)
+      }
+
+      const data = await res.json() as { text: string; usage?: TokenUsage }
+      if (typeof data.text !== 'string') throw new Error('Relay response missing "text" field')
+      return { text: data.text, usage: data.usage }
     },
 
     createFetch() {

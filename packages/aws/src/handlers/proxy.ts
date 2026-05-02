@@ -1,6 +1,8 @@
 import { DecryptCommand, KMSClient } from '@aws-sdk/client-kms'
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm'
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda'
+import { ADAPTERS } from './providers.js'
+import type { CanonicalRequest } from './providers.js'
 
 const kms = new KMSClient({})
 const ssm = new SSMClient({})
@@ -17,37 +19,7 @@ interface KeyEntry {
 interface RelayMeta {
   keyId: string
   ciphertext: string
-  provider: 'anthropic' | 'openai' | 'gemini'
-}
-
-const PROVIDER_URLS: Record<string, string> = {
-  anthropic: 'https://api.anthropic.com/v1/messages',
-  openai: 'https://api.openai.com/v1/chat/completions',
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/models:generateContent',
-}
-
-interface TokenUsage {
-  inputTokens: number
-  outputTokens: number
-}
-
-function extractUsage(provider: string, raw: unknown): TokenUsage | null {
-  if (provider === 'anthropic') {
-    const r = raw as { usage?: { input_tokens?: number; output_tokens?: number } }
-    if (!r.usage) return null
-    return { inputTokens: r.usage.input_tokens ?? 0, outputTokens: r.usage.output_tokens ?? 0 }
-  }
-  if (provider === 'openai') {
-    const r = raw as { usage?: { prompt_tokens?: number; completion_tokens?: number } }
-    if (!r.usage) return null
-    return { inputTokens: r.usage.prompt_tokens ?? 0, outputTokens: r.usage.completion_tokens ?? 0 }
-  }
-  if (provider === 'gemini') {
-    const r = raw as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
-    if (!r.usageMetadata) return null
-    return { inputTokens: r.usageMetadata.promptTokenCount ?? 0, outputTokens: r.usageMetadata.candidatesTokenCount ?? 0 }
-  }
-  return null
+  provider: string
 }
 
 async function loadKeyEntry(keyId: string): Promise<KeyEntry | null> {
@@ -62,35 +34,6 @@ async function loadKeyEntry(keyId: string): Promise<KeyEntry | null> {
     if (entry.keyId === keyId) return entry
   }
 
-  return null
-}
-
-function buildProviderHeaders(provider: string, apiKey: string): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (provider === 'anthropic') {
-    headers['x-api-key'] = apiKey
-    headers['anthropic-version'] = '2023-06-01'
-  } else {
-    headers['Authorization'] = `Bearer ${apiKey}`
-  }
-  return headers
-}
-
-// Normalize each provider's wire format to { text: string } so the browser runtime
-// is completely agnostic about which LLM is behind the relay.
-function extractText(provider: string, raw: unknown): string | null {
-  if (provider === 'anthropic') {
-    const r = raw as { content?: Array<{ type: string; text: string }> }
-    return r.content?.find(b => b.type === 'text')?.text ?? null
-  }
-  if (provider === 'openai') {
-    const r = raw as { choices?: Array<{ message?: { content?: string } }> }
-    return r.choices?.[0]?.message?.content ?? null
-  }
-  if (provider === 'gemini') {
-    const r = raw as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
-    return r.candidates?.[0]?.content?.parts?.[0]?.text ?? null
-  }
   return null
 }
 
@@ -120,8 +63,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: 'Missing _relay metadata' }) }
   }
 
-  const providerUrl = PROVIDER_URLS[relay.provider]
-  if (!providerUrl) {
+  const adapter = ADAPTERS[relay.provider]
+  if (!adapter) {
     return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: `Unknown provider: ${relay.provider}` }) }
   }
 
@@ -139,17 +82,14 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 
   // Construct request materials then immediately null sensitive references
   let apiKey: string | null = Buffer.from(decrypted.Plaintext!).toString('utf8')
-  let headers: Record<string, string> | null = buildProviderHeaders(relay.provider, apiKey)
+  let headers: Record<string, string> | null = adapter.buildHeaders(apiKey)
   apiKey = null
 
-  const { _relay: _removed, ...forwardBody } = body
-  const requestBody = JSON.stringify(forwardBody)
+  const { _relay: _removed, ...canonical } = body
+  const req = canonical as CanonicalRequest
+  const requestBody = JSON.stringify(adapter.buildRequestBody(req))
 
-  const providerRes = await fetch(providerUrl, {
-    method: 'POST',
-    headers: headers,
-    body: requestBody,
-  })
+  const providerRes = await fetch(adapter.buildUrl(req.model), { method: 'POST', headers, body: requestBody })
   headers = null
 
   if (!providerRes.ok) {
@@ -158,7 +98,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   }
 
   const providerData: unknown = await providerRes.json()
-  const text = extractText(relay.provider, providerData)
+  const text = adapter.extractText(providerData)
 
   if (text === null) {
     return { statusCode: 502, headers: cors(), body: JSON.stringify({ error: 'Could not extract text from provider response' }) }
@@ -174,7 +114,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     }
   }
 
-  const usage = extractUsage(relay.provider, providerData)
+  const usage = adapter.extractUsage(providerData)
 
   return {
     statusCode: 200,

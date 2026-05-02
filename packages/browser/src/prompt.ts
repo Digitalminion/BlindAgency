@@ -1,37 +1,37 @@
-import type { HookDefinition, HookType } from './hooks.js'
+import type { ActionDefinition, ActionType } from './actions.js'
 
 export interface PromptConfig {
   base: string
-  hooks: HookDefinition[]
+  actions: ActionDefinition[]
 }
 
-const TYPE_LABELS: Record<HookType, string> = {
-  message: 'Message Hooks (terminal — display to the user and end the turn)',
-  context: 'Context Hooks (fetch data and re-invoke you with the result)',
-  ui: 'UI Hooks (page-level side effects, no context returned)',
+const TYPE_LABELS: Record<ActionType, string> = {
+  message: 'Message Actions (terminal — display to the user and end the turn)',
+  context: 'Context Actions (fetch data and re-invoke you with the result)',
+  ui: 'UI Actions (page-level side effects, no context returned)',
 }
 
-// Describes available hooks grouped by type.
+// Describes available actions grouped by type.
 // The JSON response protocol is added automatically by createRuntime — do not duplicate it here.
 export function buildSystemPrompt(config: PromptConfig): string {
-  const { base, hooks } = config
+  const { base, actions } = config
   const sections: string[] = [base.trimEnd()]
 
-  const order: HookType[] = ['message', 'context', 'ui']
+  const order: ActionType[] = ['message', 'context', 'ui']
   for (const type of order) {
-    const group = hooks.filter(h => h.type === type)
+    const group = actions.filter(a => a.type === type)
     if (group.length === 0) continue
     sections.push(`\n## ${TYPE_LABELS[type]}\n`)
-    for (const hook of group) sections.push(formatHook(hook))
+    for (const action of group) sections.push(formatAction(action))
   }
 
   return sections.join('\n')
 }
 
-function formatHook(hook: HookDefinition): string {
-  const lines = [`### ${hook.name}`, hook.description]
-  if (hook.params) {
-    lines.push(`Parameters:\n${JSON.stringify(hook.params, null, 2)}`)
+function formatAction(action: ActionDefinition): string {
+  const lines = [`### ${action.name}`, action.description]
+  if (action.params) {
+    lines.push(`Parameters:\n${JSON.stringify(action.params, null, 2)}`)
   } else {
     lines.push('Parameters: none')
   }

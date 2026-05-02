@@ -1,12 +1,11 @@
-import { createThread, createMessageItem, threadToLlmMessages } from './thread.js'
-import { createHookRegistry } from './hooks.js'
-import type { HookRegistry } from './hooks.js'
-import type { HookDefinition } from './hooks.js'
-import type { Thread, ThreadMessage, TokenUsage } from './thread.js'
+import { createThread, createMessageItem } from './thread.js'
+import { createActionRegistry } from './actions.js'
+import type { ActionRegistry, ActionDefinition } from './actions.js'
+import type { Thread, TokenUsage } from './thread.js'
 import type { Relay } from './client.js'
 
 export interface AgentInvocation {
-  hook: string
+  action: string
   params?: unknown
 }
 
@@ -24,7 +23,7 @@ export interface RuntimeConfig {
   relay: Relay
   model: string
   systemPrompt: string
-  hooks: HookDefinition[]
+  actions: ActionDefinition[]
   thread?: Thread
   maxContextDepth?: number
 }
@@ -37,8 +36,8 @@ export interface Runtime {
 }
 
 export interface TurnContext {
-  callLlm: (ephemeral?: ThreadMessage[], signal?: AbortSignal) => Promise<{ text: string; usage?: TokenUsage }>
-  registry: HookRegistry
+  invoke: (additions?: string[], signal?: AbortSignal) => Promise<{ text: string; usage?: TokenUsage }>
+  registry: ActionRegistry
   thread: Thread
   maxDepth: number
 }
@@ -54,28 +53,28 @@ Every response must use this exact structure:
   "reasoning": "<optional>",
   "reasoningComplete": false,
   "invocations": [
-    { "hook": "<hook-name>", "params": { ... } }
+    { "action": "<action-name>", "params": { ... } }
   ]
 }
 
 ### Reasoning
 
-The "reasoning" field is optional. Use it to think through a problem before acting, or to explain why you are invoking a particular hook. Your reasoning will be injected back into the conversation before you are re-invoked — you can build on it across turns.
+The "reasoning" field is optional. Use it to think through a problem before acting, or to explain why you are invoking a particular action. Your reasoning will be injected back into the conversation before you are re-invoked — you can build on it across turns.
 
-When you have gathered everything you need and are ready to reply to the user, set "reasoningComplete": true alongside your message hook:
+When you have gathered everything you need and are ready to reply to the user, set "reasoningComplete": true alongside your message action:
 
 {
   "reasoningComplete": true,
-  "invocations": [{ "hook": "<message-hook>", "params": { "text": "..." } }]
+  "invocations": [{ "action": "<message-action>", "params": { "text": "..." } }]
 }
 
 This signals that the intermediate reasoning steps are no longer needed. They will be removed from the conversation history so future turns start clean.
 
 ### Invocation processing order
 
-1. UI hooks run first — page-level side effects, nothing returned to you.
-2. If "reasoning" is present or context hooks are invoked, you will be re-invoked. Your reasoning and any context results are injected together before the next call. Do NOT include a message hook in the same response.
-3. Message hooks are terminal — include exactly one when you are ready to reply to the user. Set "reasoningComplete": true if you used reasoning to get here.`
+1. UI actions run first — page-level side effects, nothing returned to you.
+2. If "reasoning" is present or context actions are invoked, you will be re-invoked. Your reasoning and any context results are injected together before the next call. Do NOT include a message action in the same response.
+3. Message actions are terminal — include exactly one when you are ready to reply to the user. Set "reasoningComplete": true if you used reasoning to get here.`
 
 export function parseAgentResponse(raw: string): AgentResponse {
   const stripped = raw
@@ -105,41 +104,39 @@ export function parseAgentResponse(raw: string): AgentResponse {
   return { reasoning, reasoningComplete, invocations: (parsed as AgentResponse).invocations }
 }
 
-export async function callLlm(
-  relayFetch: typeof fetch,
-  model: string,
-  systemPrompt: string,
-  messages: ThreadMessage[],
-  signal?: AbortSignal,
-): Promise<{ text: string; usage?: TokenUsage }> {
-  const res = await relayFetch('/', {
-    method: 'POST',
-    body: JSON.stringify({ model, system: systemPrompt, messages }),
-    signal,
-  })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`LLM request failed ${res.status}: ${text}`)
-  }
-
-  const data = await res.json() as { text: string; usage?: TokenUsage }
-  if (typeof data.text !== 'string') throw new Error('Relay response missing "text" field')
-  return { text: data.text, usage: data.usage }
-}
-
-function validateHookParams(hookName: string, schema: HookDefinition['params'], params: unknown): void {
+function validateActionParams(actionName: string, schema: ActionDefinition['params'], params: unknown): void {
   if (!schema) return
   const required = (schema as { required?: string[] }).required
   if (!required?.length) return
   if (typeof params !== 'object' || params === null) {
-    throw new Error(`Hook "${hookName}": params must be an object`)
+    throw new Error(`Action "${actionName}": params must be an object`)
   }
   for (const field of required) {
     if (!(field in (params as Record<string, unknown>))) {
-      throw new Error(`Hook "${hookName}": required param "${field}" is missing`)
+      throw new Error(`Action "${actionName}": required param "${field}" is missing`)
     }
   }
+}
+
+interface ResolvedInvocation {
+  inv: AgentInvocation
+  action: ActionDefinition
+}
+
+interface PartitionedInvocations {
+  ui: ResolvedInvocation[]
+  context: ResolvedInvocation[]
+  message: ResolvedInvocation[]
+}
+
+function partitionInvocations(invocations: AgentInvocation[], registry: ActionRegistry): PartitionedInvocations {
+  const result: PartitionedInvocations = { ui: [], context: [], message: [] }
+  for (const inv of invocations) {
+    const action = registry.get(inv.action)
+    if (!action) continue
+    result[action.type].push({ inv, action })
+  }
+  return result
 }
 
 // threadStartLength is the thread length when the outermost runTurn call began.
@@ -148,7 +145,7 @@ function validateHookParams(hookName: string, schema: HookDefinition['params'], 
 export async function runTurn(
   ctx: TurnContext,
   depth: number,
-  ephemeral: ThreadMessage[] = [],
+  additions: string[] = [],
   threadStartLength = ctx.thread.items.length,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -156,62 +153,45 @@ export async function runTurn(
     throw new Error(`Max context depth (${ctx.maxDepth}) exceeded`)
   }
 
-  const { text: raw, usage } = await ctx.callLlm(ephemeral, signal)
+  const { text: raw, usage } = await ctx.invoke(additions, signal)
   const response = parseAgentResponse(raw)
   ctx.thread.append(createMessageItem('agent', raw, usage))
 
-  const uiInvocations = response.invocations.filter(
-    i => ctx.registry.get(i.hook)?.type === 'ui',
-  )
-  const contextInvocations = response.invocations.filter(
-    i => ctx.registry.get(i.hook)?.type === 'context',
-  )
-  const messageInvocations = response.invocations.filter(
-    i => ctx.registry.get(i.hook)?.type === 'message',
-  )
+  const { ui, context, message } = partitionInvocations(response.invocations, ctx.registry)
 
-  for (const inv of uiInvocations) {
-    const hook = ctx.registry.get(inv.hook)
-    if (hook) {
-      validateHookParams(inv.hook, hook.params, inv.params ?? {})
-      await hook.handler(inv.params ?? {})
-    }
+  for (const { inv, action } of ui) {
+    validateActionParams(inv.action, action.params, inv.params ?? {})
+    await action.handler(inv.params ?? {})
   }
 
-  // Reasoning and context hooks are both non-terminal — collect whatever each
+  // Reasoning and context actions are both non-terminal — collect whatever each
   // contributes and re-invoke once with everything injected together.
-  if (response.reasoning !== undefined || contextInvocations.length > 0) {
-    const nextEphemeral: ThreadMessage[] = [...ephemeral]
+  if (response.reasoning !== undefined || context.length > 0) {
+    const newAdditions: string[] = []
 
     if (response.reasoning !== undefined) {
-      nextEphemeral.push({ role: 'user', content: `[Reasoning]\n${response.reasoning}` })
+      newAdditions.push(`[Reasoning]\n${response.reasoning}`)
     }
 
-    if (contextInvocations.length > 0) {
+    if (context.length > 0) {
       const parts: string[] = []
-      for (const inv of contextInvocations) {
-        const hook = ctx.registry.get(inv.hook)
-        if (hook) {
-          validateHookParams(inv.hook, hook.params, inv.params ?? {})
-          const result = await hook.handler(inv.params ?? {})
-          if (typeof result === 'string') parts.push(`[${inv.hook}]\n${result}`)
-        }
+      for (const { inv, action } of context) {
+        validateActionParams(inv.action, action.params, inv.params ?? {})
+        const result = await action.handler(inv.params ?? {})
+        if (typeof result === 'string') parts.push(`[${inv.action}]\n${result}`)
       }
       if (parts.length > 0) {
-        nextEphemeral.push({ role: 'user', content: `[Context]\n${parts.join('\n\n')}` })
+        newAdditions.push(`[Context]\n${parts.join('\n\n')}`)
       }
     }
 
-    await runTurn(ctx, depth + 1, nextEphemeral, threadStartLength, signal)
+    await runTurn(ctx, depth + 1, [...additions, ...newAdditions], threadStartLength, signal)
     return
   }
 
-  for (const inv of messageInvocations) {
-    const hook = ctx.registry.get(inv.hook)
-    if (hook) {
-      validateHookParams(inv.hook, hook.params, inv.params ?? {})
-      await hook.handler(inv.params ?? {})
-    }
+  for (const { inv, action } of message) {
+    validateActionParams(inv.action, action.params, inv.params ?? {})
+    await action.handler(inv.params ?? {})
   }
 
   // Prune intermediate reasoning turns from the thread so they don't pollute
@@ -225,11 +205,10 @@ export async function runTurn(
 }
 
 export function createRuntime(config: RuntimeConfig): Runtime {
-  const { relay, model, systemPrompt, hooks, maxContextDepth = DEFAULT_MAX_CONTEXT_DEPTH } = config
+  const { relay, model, systemPrompt, actions, maxContextDepth = DEFAULT_MAX_CONTEXT_DEPTH } = config
 
-  const registry = createHookRegistry(hooks)
+  const registry = createActionRegistry(actions)
   const thread = config.thread ?? createThread()
-  const relayFetch = relay.createFetch()
   const fullSystemPrompt = systemPrompt
     ? `${systemPrompt}\n\n${PROTOCOL_PROMPT}`
     : PROTOCOL_PROMPT
@@ -237,14 +216,8 @@ export function createRuntime(config: RuntimeConfig): Runtime {
   const accumulated: TokenUsage = { inputTokens: 0, outputTokens: 0 }
 
   const ctx: TurnContext = {
-    callLlm: async (ephemeral = [], signal) => {
-      const result = await callLlm(
-        relayFetch,
-        model,
-        fullSystemPrompt,
-        [...threadToLlmMessages(thread.items), ...ephemeral],
-        signal,
-      )
+    invoke: async (additions = [], signal) => {
+      const result = await relay.send(model, fullSystemPrompt, thread.items, additions, signal)
       if (result.usage) {
         accumulated.inputTokens += result.usage.inputTokens
         accumulated.outputTokens += result.usage.outputTokens
