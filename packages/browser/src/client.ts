@@ -1,4 +1,4 @@
-import { getPublicKey, postRelay, RELAY_PATH } from './api.js'
+import { getPublicKey, postRelay } from './api.js'
 import { importPublicKey, encryptApiKey as defaultEncryptApiKey } from './crypto.js'
 import { clearKeyBlob, loadKeyBlob, saveKeyBlob } from './storage.js'
 import { isMessageItem } from './thread.js'
@@ -27,7 +27,6 @@ export interface Relay {
     additions?: string[],
     signal?: AbortSignal,
   ): Promise<{ text: string; usage?: TokenUsage }>
-  createFetch(): typeof fetch
 }
 
 export function createRelay(config: RelayConfig): Relay {
@@ -79,32 +78,5 @@ export function createRelay(config: RelayConfig): Relay {
       }, fetchFn, signal)
     },
 
-    createFetch() {
-      return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-        const blob = loadKeyBlob()
-        if (!blob) throw new Error('No API key configured — call setKey first')
-
-        let bodyObj: Record<string, unknown> = {}
-        const rawBody = init?.body
-        if (typeof rawBody === 'string') {
-          try { bodyObj = JSON.parse(rawBody) } catch { /* non-JSON body, pass as-is in wrapper */ }
-        }
-
-        const wrapped = {
-          ...bodyObj,
-          _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
-        }
-
-        return fetchFn(`${endpoint}${RELAY_PATH}`, {
-          ...(init ?? {}),
-          method: 'POST',
-          headers: {
-            ...((init?.headers as Record<string, string> | undefined) ?? {}),
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(wrapped),
-        })
-      }
-    },
   }
 }
