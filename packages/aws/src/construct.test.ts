@@ -44,13 +44,13 @@ describe('BlindAgencyConstruct', () => {
     t.resourceCountIs('Custom::AWS', 1)
   })
 
-  it('rotation function CreateKey is tag-conditioned on Application=BlindAgency', () => {
+  it('rotation function CreateKey + TagResource are tag-conditioned on Application=BlindAgency', () => {
     const t = synth()
     t.hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Action: 'kms:CreateKey',
+            Action: Match.arrayWith(['kms:CreateKey', 'kms:TagResource']),
             Condition: { StringEquals: { 'aws:RequestTag/Application': 'BlindAgency' } },
           }),
         ]),

@@ -99,7 +99,7 @@ export class BlindAgencyConstruct extends Construct {
       // from the decrypted key could appear in trace data.
       tracing: lambda.Tracing.DISABLED,
       // Structured JSON logs so log level controls are effective.
-      logFormat: lambda.LogFormat.JSON,
+      loggingFormat: lambda.LoggingFormat.JSON,
     }
 
     // ── Lambda: public-key ──────────────────────────────────────────────────
@@ -108,14 +108,14 @@ export class BlindAgencyConstruct extends Construct {
       code: lambda.Code.fromAsset(join(HANDLERS, 'public-key')),
       environment: commonEnv,
       logGroup: publicKeyLogGroup,
-      applicationLogLevel: lambda.ApplicationLogLevel.WARN,
-      systemLogLevel: lambda.SystemLogLevel.WARN,
+      applicationLogLevelV2: lambda.ApplicationLogLevel.WARN,
+      systemLogLevelV2: lambda.SystemLogLevel.WARN,
     })
 
     publicKeyFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['ssm:GetParameter'],
       resources: [
-        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmKeyParam }),
+        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmKeyParam.slice(1) }),
       ],
     }))
 
@@ -127,8 +127,8 @@ export class BlindAgencyConstruct extends Construct {
       logGroup: proxyLogGroup,
       // WARN suppresses INFO-level system logs (START/END/REPORT) — nothing is written
       // to CloudWatch for a normal successful invocation.
-      applicationLogLevel: lambda.ApplicationLogLevel.WARN,
-      systemLogLevel: lambda.SystemLogLevel.WARN,
+      applicationLogLevelV2: lambda.ApplicationLogLevel.WARN,
+      systemLogLevelV2: lambda.SystemLogLevel.WARN,
       // Hard cap on concurrency. Prevents the relay from being used as an open LLM proxy
       // at scale and limits blast radius if credentials are stolen.
       reservedConcurrentExecutions: maxConcurrency,
@@ -137,8 +137,8 @@ export class BlindAgencyConstruct extends Construct {
     proxyFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['ssm:GetParameter'],
       resources: [
-        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmKeyParam }),
-        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmPrevParam }),
+        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmKeyParam.slice(1) }),
+        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmPrevParam.slice(1) }),
       ],
     }))
 
@@ -159,14 +159,14 @@ export class BlindAgencyConstruct extends Construct {
       environment: commonEnv,
       timeout: Duration.seconds(60),
       logGroup: rotationLogGroup,
-      applicationLogLevel: lambda.ApplicationLogLevel.WARN,
-      systemLogLevel: lambda.SystemLogLevel.WARN,
+      applicationLogLevelV2: lambda.ApplicationLogLevel.WARN,
+      systemLogLevelV2: lambda.SystemLogLevel.WARN,
     })
 
-    // CreateKey: aws:RequestTag enforces that the key MUST be created with the tag.
-    // This binds the permission to the act of tagging — you can't create an untagged key.
+    // CreateKey + TagResource: aws:RequestTag enforces that the key MUST be created with the tag.
+    // kms:TagResource is required alongside kms:CreateKey when tags are applied at creation time.
     rotationFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['kms:CreateKey'],
+      actions: ['kms:CreateKey', 'kms:TagResource'],
       resources: ['*'],
       conditions: {
         StringEquals: { 'aws:RequestTag/Application': 'BlindAgency' },
@@ -185,8 +185,8 @@ export class BlindAgencyConstruct extends Construct {
     rotationFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['ssm:GetParameter', 'ssm:PutParameter', 'ssm:DeleteParameter'],
       resources: [
-        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmKeyParam }),
-        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmPrevParam }),
+        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmKeyParam.slice(1) }),
+        Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmPrevParam.slice(1) }),
       ],
     }))
 

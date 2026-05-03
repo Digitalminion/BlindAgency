@@ -1,6 +1,6 @@
 {
   "name": "@blindagency/aws",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,8 +13,13 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc && node scripts/build-handlers.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-handlers.mjs",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
     "pretest": "node scripts/build-handlers.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
