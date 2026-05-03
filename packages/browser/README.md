@@ -26,8 +26,8 @@ const relay = createRelay({
 // Encrypt and store the user's API key — call this once when they supply it
 await relay.setKey(userApiKey)
 
-// Define your hooks — these are the actions the LLM can take
-const hooks = [
+// Define your actions — these are the things the LLM can do
+const actions = [
   {
     name: 'send-message',
     type: 'message',
@@ -52,23 +52,23 @@ const hooks = [
   },
 ]
 
-// buildSystemPrompt formats hook documentation for the LLM.
+// buildSystemPrompt formats action documentation for the LLM.
 // The JSON response protocol is appended automatically by createRuntime.
 const systemPrompt = buildSystemPrompt({
   base: 'You are a helpful assistant for Acme Corp.',
-  hooks,
+  actions,
 })
 
-const runtime = createRuntime({ relay, model: 'claude-opus-4-5-20251101', systemPrompt, hooks })
+const runtime = createRuntime({ relay, model: 'claude-opus-4-5-20251101', systemPrompt, actions })
 
 await runtime.send('What are your pricing plans?')
 ```
 
 ## How the agent loop works
 
-Every LLM response in BlindAgency is a JSON payload — not prose. The runtime instructs the model to respond exclusively with `{ "invocations": [...] }`, where each invocation names a hook and optionally provides parameters. The runtime then executes those hooks in a defined order.
+Every LLM response in BlindAgency is a JSON payload — not prose. The runtime instructs the model to respond exclusively with `{ "invocations": [...] }`, where each invocation names an action and optionally provides parameters. The runtime then executes those actions in a defined order.
 
-This structure means the LLM cannot go off-script and render raw text. It must pick an action. If it needs information before it can answer (a `context` hook), it asks for it, gets the result injected into the conversation, and is re-invoked. When it's ready to reply, it calls a `message` hook and the turn ends.
+This structure means the LLM cannot go off-script and render raw text. It must pick an action. If it needs information before it can answer (a `context` action), it asks for it, gets the result injected into the conversation, and is re-invoked. When it's ready to reply, it calls a `message` action and the turn ends.
 
 ### `message` — terminal
 
@@ -88,7 +88,7 @@ The LLM has finished reasoning and wants to show the user something. Every turn 
 
 The LLM is requesting information. Your handler fetches it, the result is injected into the conversation as a user message, and the LLM is called again. This lets the model pull in live data — pricing, inventory, user records — without you having to pre-load everything into the system prompt.
 
-Do not include a `message` hook in the same response as a `context` hook. The re-invocation handles the message.
+Do not include a `message` action in the same response as a `context` action. The re-invocation handles the message.
 
 ```typescript
 {
@@ -122,7 +122,7 @@ import { createThread, createMessageItem } from '@blindagency/browser'
 
 // Pass an external thread to createRuntime — it will read and write to it
 const thread = createThread()
-const runtime = createRuntime({ relay, model, systemPrompt, hooks, thread })
+const runtime = createRuntime({ relay, model, systemPrompt, actions, thread })
 
 // After a send(), thread.items contains the full conversation
 await runtime.send('Hello')
@@ -170,7 +170,6 @@ createRelay({
 | `setKey(apiKey)` | Encrypts the API key with the relay's current public key and stores the blob in `sessionStorage`. |
 | `hasKey()` | Returns `true` if an encrypted blob is in storage. |
 | `clearKey()` | Removes the encrypted blob from storage. Call on logout. |
-| `createFetch()` | Returns a fetch-compatible function that wraps requests with the relay envelope. |
 
 ### `createRuntime(config)`
 
@@ -179,7 +178,7 @@ createRuntime({
   relay: Relay
   model: string
   systemPrompt: string          // Protocol instructions are appended automatically
-  hooks: HookDefinition[]
+  actions: ActionDefinition[]
   thread?: Thread               // Provide your own, or a new one is created
   maxContextDepth?: number      // Max context re-invocation loops (default: 5)
 }): Runtime
@@ -193,10 +192,10 @@ createRuntime({
 
 ### `buildSystemPrompt(config)`
 
-Formats hook documentation into a structured system prompt section. The JSON response protocol is appended automatically by `createRuntime` — do not add it manually.
+Formats action documentation into a structured system prompt section. The JSON response protocol is appended automatically by `createRuntime` — do not add it manually.
 
 ```typescript
-buildSystemPrompt({ base: string, hooks: HookDefinition[] }): string
+buildSystemPrompt({ base: string, actions: ActionDefinition[] }): string
 ```
 
 ### `PROTOCOL_PROMPT`

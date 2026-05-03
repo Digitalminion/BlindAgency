@@ -1,6 +1,6 @@
 {
   "name": "@blindagency/browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,12 +13,18 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json && node scripts/build.mjs",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.0"
   }

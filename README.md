@@ -10,7 +10,7 @@ That's what "blind" means: the relay infrastructure is architecturally blind to 
 
 | Package | npm | Description |
 |---------|-----|-------------|
-| [`@blindagency/browser`](./packages/browser) | [![npm](https://img.shields.io/npm/v/@blindagency/browser)](https://www.npmjs.com/package/@blindagency/browser) | Browser runtime: key encryption, hook-driven agent loop, thread management |
+| [`@blindagency/browser`](./packages/browser) | [![npm](https://img.shields.io/npm/v/@blindagency/browser)](https://www.npmjs.com/package/@blindagency/browser) | Browser runtime: key encryption, action-driven agent loop, thread management |
 | [`@blindagency/aws`](./packages/aws) | [![npm](https://img.shields.io/npm/v/@blindagency/aws)](https://www.npmjs.com/package/@blindagency/aws) | CDK L3 construct: relay API, KMS key management, and automatic rotation |
 
 ## How it works
@@ -22,13 +22,13 @@ That's what "blind" means: the relay infrastructure is architecturally blind to 
 
 ## Agent runtime
 
-The browser package includes a lightweight agent runtime. Rather than streaming raw LLM text, it drives the LLM through a structured hook protocol — the model responds exclusively with JSON describing what it wants to do, and the runtime executes it.
+The browser package includes a lightweight agent runtime. Rather than streaming raw LLM text, it drives the LLM through a structured action protocol — the model responds exclusively with JSON describing what it wants to do, and the runtime executes it.
 
-Three hook types cover most agent patterns:
+Three action types cover most agent patterns:
 
-- **Message hooks** are terminal — the LLM has finished its turn and wants to show the user something.
-- **Context hooks** are a request for data — the LLM calls a hook, your handler fetches whatever it needs, and the result is injected back into the conversation before the LLM is re-invoked.
-- **UI hooks** are side effects — highlight an element, trigger an animation, update state — nothing is returned to the LLM.
+- **Message actions** are terminal — the LLM has finished its turn and wants to show the user something.
+- **Context actions** are a request for data — the LLM calls an action, your handler fetches whatever it needs, and the result is injected back into the conversation before the LLM is re-invoked.
+- **UI actions** are side effects — highlight an element, trigger an animation, update state — nothing is returned to the LLM.
 
 This structure keeps the LLM focused on decisions rather than formatting, and gives you clean control over what data it can access and when.
 
