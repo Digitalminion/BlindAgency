@@ -9,6 +9,11 @@ const ssm = new SSMClient({})
 
 const SSM_CURRENT = process.env.SSM_KEY_PARAM ?? '/blindagency/keys/current'
 const SSM_PREVIOUS = process.env.SSM_PREV_PARAM ?? '/blindagency/keys/previous'
+function allowedProviders(): Set<string> {
+  return new Set(
+    (process.env.PROVIDERS ?? 'anthropic,openai,gemini').split(',').map(p => p.trim()).filter(Boolean)
+  )
+}
 
 interface KeyEntry {
   keyId: string
@@ -73,6 +78,14 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 
   if (typeof model !== 'string' || !model) {
     return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: 'Missing model' }) }
+  }
+
+  if (!Array.isArray(items) || !Array.isArray(additions)) {
+    return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: 'items and additions must be arrays' }) }
+  }
+
+  if (!allowedProviders().has(relay.provider)) {
+    return { statusCode: 400, headers: cors(), body: JSON.stringify({ error: `Provider not allowed: ${relay.provider}` }) }
   }
 
   const adapter = ADAPTERS[relay.provider]

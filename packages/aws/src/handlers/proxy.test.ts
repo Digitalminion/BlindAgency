@@ -38,7 +38,9 @@ function makeEvent(provider: 'anthropic' | 'openai' | 'gemini' = 'anthropic') {
     requestContext: { http: { method: 'POST' } },
     body: JSON.stringify({
       model: 'claude-3',
-      messages: [],
+      system: 'Be helpful.',
+      items: [],
+      additions: [],
       _relay: {
         keyId: 'test-key-id',
         ciphertext: Buffer.from('encrypted').toString('base64'),
@@ -130,5 +132,40 @@ describe('proxy handler — usage extraction', () => {
     const body = JSON.parse((result as { body: string }).body)
     expect(typeof body.text).toBe('string')
     expect(body.usage).toBeDefined()
+  })
+})
+
+// ── provider guard ────────────────────────────────────────────────────────────
+
+describe('proxy handler — provider guard', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('rejects a provider not in the PROVIDERS env var', async () => {
+    vi.stubEnv('PROVIDERS', 'anthropic')
+    const event = {
+      requestContext: { http: { method: 'POST' } },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        system: '',
+        items: [],
+        additions: [],
+        _relay: { keyId: 'k', ciphertext: 'c', provider: 'openai' },
+      }),
+    }
+    const result = await handler(event as never)
+    expect((result as { statusCode: number }).statusCode).toBe(400)
+    const body = JSON.parse((result as { body: string }).body)
+    expect(body.error).toMatch(/not allowed/)
+    vi.unstubAllEnvs()
+  })
+
+  it('accepts a provider that is in the PROVIDERS env var', async () => {
+    vi.stubEnv('PROVIDERS', 'anthropic,openai')
+    stubSsm()
+    mockKmsSend.mockResolvedValue({ Plaintext: Buffer.from('sk-test') })
+    stubProviderFetch({ choices: [{ message: { content: '{"ok":true}' } }] })
+    const result = await handler(makeEvent('openai') as never)
+    expect((result as { statusCode: number }).statusCode).toBe(200)
+    vi.unstubAllEnvs()
   })
 })
