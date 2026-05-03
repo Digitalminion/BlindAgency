@@ -26,6 +26,7 @@ export interface RuntimeConfig {
   actions: ActionDefinition[]
   thread?: Thread
   maxContextDepth?: number
+  debug?: boolean
 }
 
 export interface Runtime {
@@ -40,6 +41,7 @@ export interface TurnContext {
   registry: ActionRegistry
   thread: Thread
   maxDepth: number
+  debug: boolean
 }
 
 const DEFAULT_MAX_CONTEXT_DEPTH = 5
@@ -170,12 +172,14 @@ export async function runTurn(
     const newAdditions: string[] = []
 
     if (response.reasoning !== undefined) {
+      if (ctx.debug) console.log(`[BlindAgency] depth ${depth} — reasoning: ${response.reasoning}`)
       newAdditions.push(`[Reasoning]\n${response.reasoning}`)
     }
 
     if (context.length > 0) {
       const parts: string[] = []
       for (const { inv, action } of context) {
+        if (ctx.debug) console.log(`[BlindAgency] depth ${depth} — context: ${inv.action}`)
         validateActionParams(inv.action, action.params, inv.params ?? {})
         const result = await action.handler(inv.params ?? {})
         if (typeof result === 'string') parts.push(`[${inv.action}]\n${result}`)
@@ -205,7 +209,7 @@ export async function runTurn(
 }
 
 export function createRuntime(config: RuntimeConfig): Runtime {
-  const { relay, model, systemPrompt, actions, maxContextDepth = DEFAULT_MAX_CONTEXT_DEPTH } = config
+  const { relay, model, systemPrompt, actions, maxContextDepth = DEFAULT_MAX_CONTEXT_DEPTH, debug = false } = config
 
   const registry = createActionRegistry(actions)
   const thread = config.thread ?? createThread()
@@ -227,6 +231,7 @@ export function createRuntime(config: RuntimeConfig): Runtime {
     registry,
     thread,
     maxDepth: maxContextDepth,
+    debug,
   }
 
   let busy = false
