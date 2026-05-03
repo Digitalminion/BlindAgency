@@ -2,6 +2,7 @@ import type { TokenUsage } from './thread.js'
 
 export const RELAY_PATH = '/relay' as const
 export const PUBLIC_KEY_PATH = '/public-key' as const
+export const INTEGRITY_PATH = '/integrity' as const
 
 export interface PublicKeyData {
   keyId: string

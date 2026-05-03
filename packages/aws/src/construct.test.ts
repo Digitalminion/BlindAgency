@@ -17,10 +17,10 @@ function synth(props?: Partial<ConstructorParameters<typeof BlindAgencyConstruct
 }
 
 describe('BlindAgencyConstruct', () => {
-  it('creates three application Lambda functions', () => {
+  it('creates four application Lambda functions', () => {
     const t = synth()
-    // 3 app Lambdas + 1 singleton provider Lambda from AwsCustomResource framework
-    t.resourceCountIs('AWS::Lambda::Function', 4)
+    // 4 app Lambdas (proxy, rotation, public-key, integrity) + 1 singleton provider Lambda from AwsCustomResource framework
+    t.resourceCountIs('AWS::Lambda::Function', 5)
   })
 
   it('creates an HTTP API', () => {
@@ -28,9 +28,9 @@ describe('BlindAgencyConstruct', () => {
     t.resourceCountIs('AWS::ApiGatewayV2::Api', 1)
   })
 
-  it('creates /public-key and /relay routes', () => {
+  it('creates /public-key, /relay, and /integrity routes', () => {
     const t = synth()
-    t.resourceCountIs('AWS::ApiGatewayV2::Route', 2)
+    t.resourceCountIs('AWS::ApiGatewayV2::Route', 3)
   })
 
   it('creates one rotation EventBridge rule', () => {
@@ -94,7 +94,7 @@ describe('BlindAgencyConstruct', () => {
     expect(() => synth({ providers: ['anthropic', 'openai', 'gemini'] })).not.toThrow()
   })
 
-  it('exposes apiUrl and publicKeyUrl', () => {
+  it('exposes apiUrl, publicKeyUrl, and integrityUrl', () => {
     const app = new App()
     const stack = new Stack(app, 'S', { env: { account: '123', region: 'us-east-1' } })
     const c = new BlindAgencyConstruct(stack, 'B', {
@@ -103,5 +103,6 @@ describe('BlindAgencyConstruct', () => {
     })
     expect(c.apiUrl).toBeDefined()
     expect(c.publicKeyUrl).toContain('/public-key')
+    expect(c.integrityUrl).toContain('/integrity')
   })
 })

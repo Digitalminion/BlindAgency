@@ -41,7 +41,7 @@ export interface TurnContext {
   registry: ActionRegistry
   thread: Thread
   maxDepth: number
-  debug: boolean
+  debug?: boolean
 }
 
 const DEFAULT_MAX_CONTEXT_DEPTH = 5

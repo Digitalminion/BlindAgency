@@ -32,11 +32,7 @@ jobs:
           npm test --workspace packages/aws
 
       - name: Publish @blindagency/browser
-        run: npm publish --workspace packages/browser
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace packages/browser --provenance
 
       - name: Publish @blindagency/aws
-        run: npm publish --workspace packages/aws
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace packages/aws --provenance

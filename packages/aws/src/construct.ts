@@ -32,6 +32,7 @@ const HANDLERS = join(__dirname, '..', 'dist', 'handlers')
 export class BlindAgencyConstruct extends Construct {
   readonly apiUrl: string
   readonly publicKeyUrl: string
+  readonly integrityUrl: string
 
   constructor(scope: Construct, id: string, props: BlindAgencyProps) {
     super(scope, id)
@@ -105,7 +106,7 @@ export class BlindAgencyConstruct extends Construct {
     // ── Lambda: public-key ──────────────────────────────────────────────────
     const publicKeyFn = new lambda.Function(this, 'PublicKeyFn', {
       ...fnProps,
-      code: lambda.Code.fromAsset(join(HANDLERS, 'public-key')),
+      code: lambda.Code.fromAsset(join(HANDLERS, 'public-key.zip')),
       environment: commonEnv,
       logGroup: publicKeyLogGroup,
       applicationLogLevelV2: lambda.ApplicationLogLevel.WARN,
@@ -122,7 +123,7 @@ export class BlindAgencyConstruct extends Construct {
     // ── Lambda: proxy ───────────────────────────────────────────────────────
     const proxyFn = new lambda.Function(this, 'ProxyFn', {
       ...fnProps,
-      code: lambda.Code.fromAsset(join(HANDLERS, 'proxy')),
+      code: lambda.Code.fromAsset(join(HANDLERS, 'proxy.zip')),
       environment: { ...commonEnv, PROVIDERS: providers.join(',') },
       logGroup: proxyLogGroup,
       // WARN suppresses INFO-level system logs (START/END/REPORT) — nothing is written
@@ -155,7 +156,7 @@ export class BlindAgencyConstruct extends Construct {
     // ── Lambda: rotation ────────────────────────────────────────────────────
     const rotationFn = new lambda.Function(this, 'RotationFn', {
       ...fnProps,
-      code: lambda.Code.fromAsset(join(HANDLERS, 'rotation')),
+      code: lambda.Code.fromAsset(join(HANDLERS, 'rotation.zip')),
       environment: commonEnv,
       timeout: Duration.seconds(60),
       logGroup: rotationLogGroup,
@@ -187,6 +188,39 @@ export class BlindAgencyConstruct extends Construct {
       resources: [
         Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmKeyParam.slice(1) }),
         Stack.of(this).formatArn({ service: 'ssm', resource: 'parameter', resourceName: ssmPrevParam.slice(1) }),
+      ],
+    }))
+
+    // ── Lambda: integrity ───────────────────────────────────────────────────
+    const integrityLogGroup = new logs.LogGroup(this, 'IntegrityLogs', {
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    })
+
+    const integrityFn = new lambda.Function(this, 'IntegrityFn', {
+      ...fnProps,
+      code: lambda.Code.fromAsset(join(HANDLERS, 'integrity.zip')),
+      environment: {
+        CORS_ORIGIN: corsOrigin,
+        PROXY_FN_NAME: proxyFn.functionName,
+        ROTATION_FN_NAME: rotationFn.functionName,
+        PUBLIC_KEY_FN_NAME: publicKeyFn.functionName,
+      },
+      logGroup: integrityLogGroup,
+      applicationLogLevelV2: lambda.ApplicationLogLevel.WARN,
+      systemLogLevelV2: lambda.SystemLogLevel.WARN,
+    })
+
+    // GetFunctionConfiguration on the three application handlers.
+    // Self is intentionally excluded — referencing own ARN creates a CDK cycle
+    // (IAM policy ↔ Lambda DependsOn). Auditors can verify the integrity handler
+    // itself via `aws lambda get-function-configuration` against the npm manifest.
+    integrityFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['lambda:GetFunctionConfiguration'],
+      resources: [
+        proxyFn.functionArn,
+        rotationFn.functionArn,
+        publicKeyFn.functionArn,
       ],
     }))
 
@@ -253,7 +287,14 @@ export class BlindAgencyConstruct extends Construct {
       integration: new integrations.HttpLambdaIntegration('RelayIntegration', proxyFn),
     })
 
+    api.addRoutes({
+      path: '/integrity',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration: new integrations.HttpLambdaIntegration('IntegrityIntegration', integrityFn),
+    })
+
     this.apiUrl = api.apiEndpoint
     this.publicKeyUrl = `${api.apiEndpoint}/public-key`
+    this.integrityUrl = `${api.apiEndpoint}/integrity`
   }
 }

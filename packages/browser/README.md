@@ -198,6 +198,32 @@ Formats action documentation into a structured system prompt section. The JSON r
 buildSystemPrompt({ base: string, actions: ActionDefinition[] }): string
 ```
 
+### `verify(endpoint, manifest, fetchFn?)`
+
+Verifies that a deployed relay's Lambda handlers match the hashes published with the npm release. Calls `GET /integrity` on the endpoint — which queries the AWS Lambda control plane for live `CodeSha256` values — and compares them against the manifest bundled with `@blindagency/aws`.
+
+```typescript
+import { verify } from '@blindagency/browser'
+import manifest from '@blindagency/aws/dist/lambda-hashes.json' assert { type: 'json' }
+
+const result = await verify(
+  'https://your-relay.execute-api.us-east-1.amazonaws.com',
+  manifest,
+)
+
+console.log(result.valid)   // true if all handlers match the published hashes
+console.log(result.version) // npm version the manifest was published under
+
+// Per-handler breakdown
+for (const [name, h] of Object.entries(result.handlers)) {
+  console.log(name, h.match ? 'ok' : `MISMATCH live=${h.live} published=${h.published}`)
+}
+```
+
+`result.valid` is `true` only if every handler in the manifest has a matching live hash. A mismatch means the deployed Lambda code does not correspond to the published npm version — either the package version is out of sync with the deployed stack, or the Lambda code was modified after deployment.
+
+The hashes come from the AWS control plane, not from anything the relay operator controls. See [`@blindagency/aws`](https://www.npmjs.com/package/@blindagency/aws) for details on how the hashes are produced and what they prove.
+
 ### `PROTOCOL_PROMPT`
 
 The JSON protocol instruction string injected into every system prompt. Exported for inspection or testing.
@@ -223,6 +249,8 @@ This package meaningfully reduces the risk of API key exposure compared to proxy
 - The LLM provider — once the request reaches Anthropic, OpenAI, or Gemini, their standard data handling applies.
 
 The right framing: this is a **trust-minimizing relay**, not a zero-trust system. It is well-suited for "bring your own key" flows where you want to credibly tell users you are not storing their credentials. It is not a substitute for end-to-end encryption in high-security contexts.
+
+**Verifying the relay deployment:** `verify()` lets you confirm that the Lambda handlers running in the deployer's AWS account are byte-for-byte identical to the code published under the installed npm version. A valid result does not eliminate trust in the relay operator's AWS account — it confirms only that the code has not been modified from the published release.
 
 ## License
 

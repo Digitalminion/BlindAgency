@@ -55,13 +55,14 @@ await relay.setKey(userApiKey)
 
 ## What gets deployed
 
-Three Lambdas serve distinct roles and are granted only the permissions they need.
+Four Lambdas serve distinct roles and are granted only the permissions they need.
 
 | Resource | Purpose |
 |----------|---------|
 | `GET /public-key` Lambda | Returns `{ keyId, publicKeyPem }` — the current RSA public key for client-side encryption |
 | `POST /relay` Lambda | Decrypts the API key via KMS, forwards the request to the LLM provider, returns `{ text }` |
 | Rotation Lambda | Creates a new KMS RSA-2048 key pair on schedule, updates SSM, schedules deletion of the old key |
+| `GET /integrity` Lambda | Queries AWS for the live `CodeSha256` of each handler and returns them — used to verify the deployed code matches the published npm release |
 | KMS asymmetric key | RSA-OAEP key pair — the private key never leaves KMS |
 | SSM Parameter Store | Holds `current` and `previous` key entries (`{ keyId, keyArn, publicKeyPem }`) |
 | EventBridge rule | Triggers the rotation Lambda on the configured interval |
@@ -82,6 +83,57 @@ Three Lambdas serve distinct roles and are granted only the permissions they nee
 |----------|-------------|
 | `apiUrl` | Base URL of the HTTP API — pass to `createRelay({ endpoint })` |
 | `publicKeyUrl` | Full URL of the `GET /public-key` endpoint |
+| `integrityUrl` | Full URL of the `GET /integrity` endpoint |
+
+## Supply chain verification
+
+Every published version of this package includes `dist/lambda-hashes.json` — a manifest of SHA-256 hashes for each Lambda handler ZIP, computed during the build and locked to the exact bytes that get uploaded to AWS.
+
+```json
+{
+  "version": "0.1.2",
+  "handlers": {
+    "proxy":       "sha256:r8Ollo22lUVh6cziFXmfA1yY5aeOQbvEPTdluebUYwI=",
+    "rotation":    "sha256:77YF0dMv0TaELNPaA2Cpg/7JstGwQOAEF9pQHS6d19Q=",
+    "public-key":  "sha256:DPXXPxajWN5OYutPxjWz5l6uU0ZxYPl9/y7TBQlgCSY=",
+    "integrity":   "sha256:ErqGGAwYX53lHRJOdTUXmOpWvrjuNzVQaU+mfmSpWpA="
+  }
+}
+```
+
+The hashes use the same encoding (`sha256:<base64>`) that AWS uses for `CodeSha256` on Lambda function configurations. When CDK deploys the construct, it uploads those exact ZIPs — no re-zipping, no transformation. The hash you see in the manifest is the hash AWS records.
+
+The `/integrity` endpoint returns the live `CodeSha256` values by calling `GetFunctionConfiguration` on each handler directly from the Lambda control plane. This is not a self-reported value baked into the function's code — it is AWS's own record of what is running.
+
+**To verify a deployed relay against the published manifest:**
+
+```bash
+# Fetch the live hashes from the deployed endpoint
+curl https://your-relay.execute-api.us-east-1.amazonaws.com/integrity
+
+# Compare against the published manifest for the installed version
+cat node_modules/@blindagency/aws/dist/lambda-hashes.json
+```
+
+Or programmatically using `verify()` from `@blindagency/browser`:
+
+```typescript
+import { verify } from '@blindagency/browser'
+import manifest from '@blindagency/aws/dist/lambda-hashes.json' assert { type: 'json' }
+
+const result = await verify('https://your-relay.execute-api.us-east-1.amazonaws.com', manifest)
+
+if (!result.valid) {
+  const mismatched = Object.entries(result.handlers)
+    .filter(([, h]) => !h.match)
+    .map(([name]) => name)
+  console.error('Hash mismatch on:', mismatched)
+}
+```
+
+**What a matching hash proves:** the Lambda handler running in the deployer's AWS account is byte-for-byte identical to the code published under that npm version. It does not prove anything about the deployer's AWS account configuration, IAM policies, or infrastructure outside this construct.
+
+**The integrity handler itself** is intentionally excluded from its own response — a Lambda cannot reference its own ARN in an IAM policy without creating a CloudFormation dependency cycle. Its hash is in the npm manifest (`handlers.integrity`) and can be verified independently with `aws lambda get-function-configuration --function-name <IntegrityFn-name> --query CodeSha256`.
 
 ## Security
 
