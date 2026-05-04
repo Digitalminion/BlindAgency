@@ -68,7 +68,7 @@ function makeZip(filename, data) {
   central.writeUInt16LE(0, 34)          // disk number start
   central.writeUInt16LE(0, 36)          // internal attrs
   central.writeUInt32LE(0, 38)          // external attrs
-  central.writeUInt32LE(centralOffset, 42) // local header offset
+  central.writeUInt32LE(0, 42)             // local header offset — single file, always at 0
   name.copy(central, 46)
 
   const eocd = Buffer.alloc(22)
