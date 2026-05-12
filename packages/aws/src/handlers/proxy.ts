@@ -160,10 +160,10 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   let rekey: { keyId: string; ciphertext: string } | null = null
   if (lookup.currentEntry) {
     try {
-      const rekeyBuf = publicEncrypt(
-        { key: lookup.currentEntry.publicKeyPem, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256', mgf1Hash: 'sha256' },
-        Buffer.from(apiKey),
-      )
+      // mgf1Hash is valid at runtime but missing from some @types/node releases;
+      // assign to a variable to bypass excess-property checking before casting.
+      const encryptParams = { key: lookup.currentEntry.publicKeyPem, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256', mgf1Hash: 'sha256' }
+      const rekeyBuf = publicEncrypt(encryptParams as Parameters<typeof publicEncrypt>[0], Buffer.from(apiKey))
       rekey = { keyId: lookup.currentEntry.keyId, ciphertext: rekeyBuf.toString('base64') }
     } catch {
       // Re-encryption failed; the response still succeeds, client will rotate on next attempt
