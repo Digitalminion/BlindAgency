@@ -49,6 +49,10 @@ describe('anthropic adapter', () => {
     expect(a.extractText({})).toBeNull()
   })
 
+  it('extractText returns null when content is not an array', () => {
+    expect(a.extractText({ content: 'not-an-array' })).toBeNull()
+  })
+
   it('extractUsage normalizes input_tokens and output_tokens', () => {
     expect(a.extractUsage({ usage: { input_tokens: 100, output_tokens: 50 } }))
       .toEqual({ inputTokens: 100, outputTokens: 50 })
@@ -60,6 +64,11 @@ describe('anthropic adapter', () => {
 
   it('extractUsage defaults missing counts to zero', () => {
     expect(a.extractUsage({ usage: {} })).toEqual({ inputTokens: 0, outputTokens: 0 })
+  })
+
+  it('extractUsage defaults to zero when token fields are strings', () => {
+    expect(a.extractUsage({ usage: { input_tokens: '100', output_tokens: '50' } }))
+      .toEqual({ inputTokens: 0, outputTokens: 0 })
   })
 })
 
@@ -99,6 +108,10 @@ describe('openai adapter', () => {
     expect(a.extractText({})).toBeNull()
   })
 
+  it('extractText returns null when choices is not an array', () => {
+    expect(a.extractText({ choices: 'not-an-array' })).toBeNull()
+  })
+
   it('extractUsage normalizes prompt_tokens and completion_tokens', () => {
     expect(a.extractUsage({ usage: { prompt_tokens: 200, completion_tokens: 75 } }))
       .toEqual({ inputTokens: 200, outputTokens: 75 })
@@ -106,6 +119,11 @@ describe('openai adapter', () => {
 
   it('extractUsage returns null when usage is absent', () => {
     expect(a.extractUsage({})).toBeNull()
+  })
+
+  it('extractUsage defaults to zero when token fields are strings', () => {
+    expect(a.extractUsage({ usage: { prompt_tokens: '200', completion_tokens: '75' } }))
+      .toEqual({ inputTokens: 0, outputTokens: 0 })
   })
 })
 
@@ -158,6 +176,10 @@ describe('gemini adapter', () => {
     expect(a.extractText({})).toBeNull()
   })
 
+  it('extractText returns null when candidates is not an array', () => {
+    expect(a.extractText({ candidates: 'not-an-array' })).toBeNull()
+  })
+
   it('extractUsage normalizes promptTokenCount and candidatesTokenCount', () => {
     expect(a.extractUsage({ usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 45 } }))
       .toEqual({ inputTokens: 120, outputTokens: 45 })
@@ -165,6 +187,11 @@ describe('gemini adapter', () => {
 
   it('extractUsage returns null when usageMetadata is absent', () => {
     expect(a.extractUsage({})).toBeNull()
+  })
+
+  it('extractUsage defaults to zero when token fields are strings', () => {
+    expect(a.extractUsage({ usageMetadata: { promptTokenCount: '120', candidatesTokenCount: '45' } }))
+      .toEqual({ inputTokens: 0, outputTokens: 0 })
   })
 })
 

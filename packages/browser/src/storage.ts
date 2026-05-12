@@ -27,7 +27,16 @@ export function saveKeyBlob(blob: KeyBlob): void {
 export function loadKeyBlob(): KeyBlob | null {
   if (available()) {
     const raw = sessionStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as KeyBlob) : null
+    if (!raw) return null
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (
+        typeof parsed === 'object' && parsed !== null &&
+        typeof (parsed as Record<string, unknown>).keyId === 'string' &&
+        typeof (parsed as Record<string, unknown>).ciphertext === 'string'
+      ) return parsed as KeyBlob
+    } catch { /* ignore corrupt storage */ }
+    return null
   }
   return memoryStore
 }

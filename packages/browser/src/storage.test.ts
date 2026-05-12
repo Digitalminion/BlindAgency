@@ -41,4 +41,30 @@ describe('storage', () => {
     saveKeyBlob({ keyId: 'key-2', ciphertext: 'xyz' })
     expect(loadKeyBlob()?.keyId).toBe('key-2')
   })
+
+  it('returns null and does not throw when storage contains malformed JSON', () => {
+    store['blindagency:keyblob'] = 'not-valid-json{{{'
+    expect(() => loadKeyBlob()).not.toThrow()
+    expect(loadKeyBlob()).toBeNull()
+  })
+
+  it('returns null when stored object is missing keyId', () => {
+    store['blindagency:keyblob'] = JSON.stringify({ ciphertext: 'abc' })
+    expect(loadKeyBlob()).toBeNull()
+  })
+
+  it('returns null when stored object is missing ciphertext', () => {
+    store['blindagency:keyblob'] = JSON.stringify({ keyId: 'k' })
+    expect(loadKeyBlob()).toBeNull()
+  })
+
+  it('returns null when stored value is not an object', () => {
+    store['blindagency:keyblob'] = JSON.stringify(42)
+    expect(loadKeyBlob()).toBeNull()
+  })
+
+  it('returns null when keyId is not a string', () => {
+    store['blindagency:keyblob'] = JSON.stringify({ keyId: 123, ciphertext: 'abc' })
+    expect(loadKeyBlob()).toBeNull()
+  })
 })

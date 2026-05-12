@@ -82,11 +82,13 @@ export class BlindAgencyConstruct extends Construct {
 
     const rotationLogGroup = new logs.LogGroup(this, 'RotationLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
+      encryptionKey: logEncryptionKey,
       removalPolicy: RemovalPolicy.DESTROY,
     })
 
     const publicKeyLogGroup = new logs.LogGroup(this, 'PublicKeyLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
+      encryptionKey: logEncryptionKey,
       removalPolicy: RemovalPolicy.DESTROY,
     })
 
@@ -107,7 +109,7 @@ export class BlindAgencyConstruct extends Construct {
     const publicKeyFn = new lambda.Function(this, 'PublicKeyFn', {
       ...fnProps,
       code: lambda.Code.fromAsset(join(HANDLERS, 'public-key.zip')),
-      environment: commonEnv,
+      environment: { SSM_KEY_PARAM: ssmKeyParam, CORS_ORIGIN: corsOrigin },
       logGroup: publicKeyLogGroup,
       applicationLogLevelV2: lambda.ApplicationLogLevel.WARN,
       systemLogLevelV2: lambda.SystemLogLevel.WARN,
@@ -157,15 +159,21 @@ export class BlindAgencyConstruct extends Construct {
     const rotationFn = new lambda.Function(this, 'RotationFn', {
       ...fnProps,
       code: lambda.Code.fromAsset(join(HANDLERS, 'rotation.zip')),
-      environment: commonEnv,
+      environment: { SSM_KEY_PARAM: ssmKeyParam, SSM_PREV_PARAM: ssmPrevParam },
       timeout: Duration.seconds(60),
       logGroup: rotationLogGroup,
       applicationLogLevelV2: lambda.ApplicationLogLevel.WARN,
       systemLogLevelV2: lambda.SystemLogLevel.WARN,
+      // EventBridge can double-fire; concurrent executions corrupt SSM key state and orphan KMS keys
+      reservedConcurrentExecutions: 1,
     })
 
     // CreateKey + TagResource: aws:RequestTag enforces that the key MUST be created with the tag.
-    // kms:TagResource is required alongside kms:CreateKey when tags are applied at creation time.
+    // kms:TagResource is required when tags are applied at CreateKey time (AWS evaluates both).
+    // IAM limitation: aws:RequestTag on TagResource restricts which tags can be added but not
+    // which key is tagged. An SCP can further restrict TagResource to keys owned by this Lambda
+    // if cross-key tagging is a concern in the account. Within this stack, rotation is the only
+    // caller and it exclusively targets keys it just created.
     rotationFn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['kms:CreateKey', 'kms:TagResource'],
       resources: ['*'],
@@ -176,7 +184,7 @@ export class BlindAgencyConstruct extends Construct {
 
     // Key management: aws:ResourceTag enforces these actions only work on already-tagged keys.
     rotationFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['kms:GetPublicKey', 'kms:ScheduleKeyDeletion', 'kms:DescribeKey'],
+      actions: ['kms:GetPublicKey', 'kms:ScheduleKeyDeletion'],
       resources: ['*'],
       conditions: {
         StringEquals: { 'aws:ResourceTag/Application': 'BlindAgency' },
@@ -194,6 +202,7 @@ export class BlindAgencyConstruct extends Construct {
     // ── Lambda: integrity ───────────────────────────────────────────────────
     const integrityLogGroup = new logs.LogGroup(this, 'IntegrityLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
+      encryptionKey: logEncryptionKey,
       removalPolicy: RemovalPolicy.DESTROY,
     })
 

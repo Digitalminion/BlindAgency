@@ -203,6 +203,29 @@ describe('send()', () => {
     ).rejects.toThrow('"text"')
   })
 
+  it('updates stored key blob when the response contains rekey', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'old-key', ciphertext: 'old-ct' })
+    const fetchFn = mockSendFetch({ text: '{}', rekey: { keyId: 'new-key', ciphertext: 'new-ct' } })
+    await makeSendRelay(fetchFn).send('m', 's', [])
+    expect(JSON.parse(store[STORAGE_KEY])).toEqual({ keyId: 'new-key', ciphertext: 'new-ct' })
+  })
+
+  it('does not update stored key blob when response has no rekey', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'old-key', ciphertext: 'old-ct' })
+    await makeSendRelay(mockSendFetch({ text: '{}' })).send('m', 's', [])
+    expect(JSON.parse(store[STORAGE_KEY])).toEqual({ keyId: 'old-key', ciphertext: 'old-ct' })
+  })
+
+  it('uses the upgraded ciphertext on subsequent sends after a rekey response', async () => {
+    store[STORAGE_KEY] = JSON.stringify({ keyId: 'old-key', ciphertext: 'old-ct' })
+    await makeSendRelay(mockSendFetch({ text: '{}', rekey: { keyId: 'new-key', ciphertext: 'new-ct' } })).send('m', 's', [])
+
+    const fetchFn2 = mockSendFetch({ text: '{}' })
+    await makeSendRelay(fetchFn2).send('m', 's', [])
+    const body = JSON.parse((vi.mocked(fetchFn2).mock.calls[0][1] as RequestInit).body as string)
+    expect(body._relay).toEqual({ keyId: 'new-key', ciphertext: 'new-ct', provider: 'anthropic' })
+  })
+
   it('forwards AbortSignal to fetch', async () => {
     store[STORAGE_KEY] = JSON.stringify({ keyId: 'k', ciphertext: 'c' })
     const fetchFn = mockSendFetch({ text: '{}' })

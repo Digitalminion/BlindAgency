@@ -72,6 +72,35 @@ describe('BlindAgencyConstruct', () => {
     })
   })
 
+  it('all log groups use KMS encryption', () => {
+    const t = synth()
+    const logGroups = t.findResources('AWS::Logs::LogGroup')
+    const encryptedCount = Object.values(logGroups).filter(
+      (lg: unknown) => (lg as { Properties: Record<string, unknown> }).Properties.KmsKeyId !== undefined
+    ).length
+    expect(encryptedCount).toBe(Object.keys(logGroups).length)
+  })
+
+  it('rotation Lambda does not have CORS_ORIGIN in environment', () => {
+    const t = synth()
+    const fns = t.findResources('AWS::Lambda::Function')
+    const rotationFnEnvs = Object.values(fns)
+      .map((fn: unknown) => (fn as { Properties: { Environment?: { Variables?: Record<string, unknown> } } }).Properties.Environment?.Variables)
+      .filter(Boolean)
+    const hasCorsInRotation = rotationFnEnvs.some(env => env && 'CORS_ORIGIN' in env && 'SSM_PREV_PARAM' in (env as object) && !('PROVIDERS' in (env as object)))
+    expect(hasCorsInRotation).toBe(false)
+  })
+
+  it('rotation function does not have kms:DescribeKey permission', () => {
+    const t = synth()
+    const policies = t.findResources('AWS::IAM::Policy')
+    const allActions = Object.values(policies).flatMap((p: unknown) => {
+      const doc = (p as { Properties: { PolicyDocument: { Statement: Array<{ Action: string | string[] }> } } }).Properties.PolicyDocument
+      return doc.Statement.flatMap(s => (Array.isArray(s.Action) ? s.Action : [s.Action]))
+    })
+    expect(allActions).not.toContain('kms:DescribeKey')
+  })
+
   it('proxy Decrypt is tag-conditioned on Application=BlindAgency', () => {
     const t = synth()
     t.hasResourceProperties('AWS::IAM::Policy', {
@@ -83,6 +112,13 @@ describe('BlindAgencyConstruct', () => {
           }),
         ]),
       },
+    })
+  })
+
+  it('sets rotation Lambda reserved concurrency to 1 to prevent double-fire corruption', () => {
+    const t = synth()
+    t.hasResourceProperties('AWS::Lambda::Function', {
+      ReservedConcurrentExecutions: 1,
     })
   })
 

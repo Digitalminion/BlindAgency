@@ -37,6 +37,18 @@ describe('getPublicKey', () => {
     const fetchFn = vi.fn().mockRejectedValue(new Error('network down')) as unknown as typeof fetch
     await expect(getPublicKey(ENDPOINT, fetchFn)).rejects.toThrow('network down')
   })
+
+  it('throws when the response is missing keyId', async () => {
+    await expect(getPublicKey(ENDPOINT, mockFetch({ publicKeyPem: 'pem' }))).rejects.toThrow()
+  })
+
+  it('throws when the response is missing publicKeyPem', async () => {
+    await expect(getPublicKey(ENDPOINT, mockFetch({ keyId: 'k' }))).rejects.toThrow()
+  })
+
+  it('throws when the response is not an object', async () => {
+    await expect(getPublicKey(ENDPOINT, mockFetch(42 as unknown as object))).rejects.toThrow()
+  })
 })
 
 // ── postRelay ─────────────────────────────────────────────────────────────
@@ -91,12 +103,52 @@ describe('postRelay', () => {
     expect(result.usage).toBeUndefined()
   })
 
+  it('returns undefined usage when usage values are non-numeric strings', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok', usage: { inputTokens: '10', outputTokens: '5' } }))
+    expect(result.usage).toBeUndefined()
+  })
+
   it('throws on a non-ok response', async () => {
     await expect(postRelay(ENDPOINT, REQUEST, mockFetch({ error: 'rate limited' }, false))).rejects.toThrow('500')
   })
 
   it('throws when the response is missing the text field', async () => {
     await expect(postRelay(ENDPOINT, REQUEST, mockFetch({ result: 'oops' }))).rejects.toThrow('"text"')
+  })
+
+  it('passes rekey through when the relay includes it', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok', rekey: { keyId: 'new-id', ciphertext: 'new-ct' } }))
+    expect(result.rekey).toEqual({ keyId: 'new-id', ciphertext: 'new-ct' })
+  })
+
+  it('omits rekey when the relay does not include it', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok' }))
+    expect('rekey' in result).toBe(false)
+  })
+
+  it('omits rekey when ciphertext is an empty string', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok', rekey: { keyId: 'k', ciphertext: '' } }))
+    expect('rekey' in result).toBe(false)
+  })
+
+  it('omits rekey when keyId is missing', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok', rekey: { ciphertext: 'abc' } }))
+    expect('rekey' in result).toBe(false)
+  })
+
+  it('omits rekey when the value is not an object', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok', rekey: 'bad' }))
+    expect('rekey' in result).toBe(false)
+  })
+
+  it('omits rekey when ciphertext exceeds 512 characters', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok', rekey: { keyId: 'k', ciphertext: 'A'.repeat(513) } }))
+    expect('rekey' in result).toBe(false)
+  })
+
+  it('omits rekey when keyId or ciphertext are null', async () => {
+    const result = await postRelay(ENDPOINT, REQUEST, mockFetch({ text: 'ok', rekey: { keyId: null, ciphertext: null } }))
+    expect('rekey' in result).toBe(false)
   })
 
   it('forwards the AbortSignal to fetch', async () => {

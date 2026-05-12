@@ -47,7 +47,9 @@ export function createRelay(config: RelayConfig): Relay {
       const { keyId, publicKey } = await fetchPublicKey(endpoint, fetchFn)
       const encrypted = await encryptApiKey(apiKey, publicKey)
       const bytes = new Uint8Array(encrypted)
-      const ciphertext = btoa(String.fromCharCode(...bytes))
+      let binary = ''
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+      const ciphertext = btoa(binary)
       saveKeyBlob({ keyId, ciphertext })
     },
 
@@ -69,13 +71,17 @@ export function createRelay(config: RelayConfig): Relay {
         return ctx !== null ? [{ from: 'context', body: ctx }] : []
       })
 
-      return postRelay(endpoint, {
+      const response = await postRelay(endpoint, {
         model,
         system,
         items: relayItems,
         additions,
         _relay: { keyId: blob.keyId, ciphertext: blob.ciphertext, provider },
       }, fetchFn, signal)
+
+      if (response.rekey) saveKeyBlob(response.rekey)
+
+      return { text: response.text, usage: response.usage }
     },
 
   }

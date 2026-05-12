@@ -25,12 +25,35 @@ export interface RelayRequest {
 export interface RelayResponse {
   text: string
   usage?: TokenUsage
+  rekey?: { keyId: string; ciphertext: string }
 }
 
 export async function getPublicKey(endpoint: string, fetchFn: typeof fetch): Promise<PublicKeyData> {
   const res = await fetchFn(`${endpoint}${PUBLIC_KEY_PATH}`)
   if (!res.ok) throw new Error(`getPublicKey failed: ${res.status}`)
-  return res.json() as Promise<PublicKeyData>
+  const data = await res.json() as unknown
+  if (
+    typeof data !== 'object' || data === null ||
+    typeof (data as Record<string, unknown>).keyId !== 'string' ||
+    typeof (data as Record<string, unknown>).publicKeyPem !== 'string'
+  ) {
+    throw new Error('getPublicKey: invalid response shape')
+  }
+  return data as PublicKeyData
+}
+
+function isValidRekey(value: unknown): value is { keyId: string; ciphertext: string } {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return typeof v.keyId === 'string' && v.keyId.length > 0
+    && typeof v.ciphertext === 'string' && v.ciphertext.length > 0
+    && v.ciphertext.length <= 512
+}
+
+function isValidUsage(value: unknown): value is TokenUsage {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return typeof v.inputTokens === 'number' && typeof v.outputTokens === 'number'
 }
 
 export async function postRelay(
@@ -49,7 +72,10 @@ export async function postRelay(
     const text = await res.text()
     throw new Error(`Relay request failed ${res.status}: ${text}`)
   }
-  const data = await res.json() as RelayResponse
-  if (typeof data.text !== 'string') throw new Error('Relay response missing "text" field')
-  return { text: data.text, usage: data.usage }
+  const data = await res.json() as Record<string, unknown>
+  const text = data.text
+  if (typeof text !== 'string') throw new Error('Relay response missing "text" field')
+  const usage = isValidUsage(data.usage) ? data.usage : undefined
+  const rekey = isValidRekey(data.rekey) ? data.rekey : undefined
+  return { text, usage, ...(rekey && { rekey }) }
 }

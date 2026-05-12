@@ -40,13 +40,17 @@ const anthropic: ProviderAdapter = {
 
   extractText: (raw) => {
     const r = raw as { content?: Array<{ type: string; text: string }> }
-    return r.content?.find(b => b.type === 'text')?.text ?? null
+    if (!Array.isArray(r.content)) return null
+    return r.content.find(b => b.type === 'text')?.text ?? null
   },
 
   extractUsage: (raw) => {
-    const r = raw as { usage?: { input_tokens?: number; output_tokens?: number } }
+    const r = raw as { usage?: { input_tokens?: unknown; output_tokens?: unknown } }
     if (!r.usage) return null
-    return { inputTokens: r.usage.input_tokens ?? 0, outputTokens: r.usage.output_tokens ?? 0 }
+    return {
+      inputTokens: typeof r.usage.input_tokens === 'number' ? r.usage.input_tokens : 0,
+      outputTokens: typeof r.usage.output_tokens === 'number' ? r.usage.output_tokens : 0,
+    }
   },
 }
 
@@ -68,13 +72,17 @@ const openai: ProviderAdapter = {
 
   extractText: (raw) => {
     const r = raw as { choices?: Array<{ message?: { content?: string } }> }
-    return r.choices?.[0]?.message?.content ?? null
+    if (!Array.isArray(r.choices)) return null
+    return r.choices[0]?.message?.content ?? null
   },
 
   extractUsage: (raw) => {
-    const r = raw as { usage?: { prompt_tokens?: number; completion_tokens?: number } }
+    const r = raw as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } }
     if (!r.usage) return null
-    return { inputTokens: r.usage.prompt_tokens ?? 0, outputTokens: r.usage.completion_tokens ?? 0 }
+    return {
+      inputTokens: typeof r.usage.prompt_tokens === 'number' ? r.usage.prompt_tokens : 0,
+      outputTokens: typeof r.usage.completion_tokens === 'number' ? r.usage.completion_tokens : 0,
+    }
   },
 }
 
@@ -97,15 +105,16 @@ const gemini: ProviderAdapter = {
 
   extractText: (raw) => {
     const r = raw as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
-    return r.candidates?.[0]?.content?.parts?.[0]?.text ?? null
+    if (!Array.isArray(r.candidates)) return null
+    return r.candidates[0]?.content?.parts?.[0]?.text ?? null
   },
 
   extractUsage: (raw) => {
-    const r = raw as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
+    const r = raw as { usageMetadata?: { promptTokenCount?: unknown; candidatesTokenCount?: unknown } }
     if (!r.usageMetadata) return null
     return {
-      inputTokens: r.usageMetadata.promptTokenCount ?? 0,
-      outputTokens: r.usageMetadata.candidatesTokenCount ?? 0,
+      inputTokens: typeof r.usageMetadata.promptTokenCount === 'number' ? r.usageMetadata.promptTokenCount : 0,
+      outputTokens: typeof r.usageMetadata.candidatesTokenCount === 'number' ? r.usageMetadata.candidatesTokenCount : 0,
     }
   },
 }

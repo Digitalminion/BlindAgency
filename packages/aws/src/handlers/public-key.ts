@@ -19,7 +19,23 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   }
 
   const res = await ssm.send(new GetParameterCommand({ Name: SSM_CURRENT })).catch(() => null)
-  const entry = JSON.parse(res?.Parameter?.Value ?? 'null') as { keyId: string; publicKeyPem: string } | null
+  const rawValue = res?.Parameter?.Value
+
+  let entry: { keyId: string; publicKeyPem: string } | null = null
+  if (rawValue) {
+    try {
+      const parsed = JSON.parse(rawValue) as unknown
+      if (
+        typeof parsed === 'object' && parsed !== null &&
+        typeof (parsed as Record<string, unknown>).keyId === 'string' &&
+        typeof (parsed as Record<string, unknown>).publicKeyPem === 'string'
+      ) {
+        entry = parsed as { keyId: string; publicKeyPem: string }
+      }
+    } catch {
+      // Malformed SSM entry — treat as uninitialized
+    }
+  }
 
   if (!entry) {
     return { statusCode: 503, headers: { ...cors(), 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Key not yet initialized' }) }

@@ -5,6 +5,7 @@ export interface PublicKeyInfo {
 
 function pemToDer(pem: string): ArrayBuffer {
   const b64 = pem
+    .replace(/\r/g, '')
     .split('\n')
     .filter(l => !l.startsWith('-----'))
     .join('')

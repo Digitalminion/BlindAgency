@@ -2,6 +2,7 @@ import {
   CreateKeyCommand,
   GetPublicKeyCommand,
   KMSClient,
+  KMSInvalidStateException,
   KeySpec,
   KeyUsageType,
   ScheduleKeyDeletionCommand,
@@ -19,8 +20,10 @@ const ssm = new SSMClient({})
 
 const SSM_CURRENT = process.env.SSM_KEY_PARAM ?? '/blindagency/keys/current'
 const SSM_PREVIOUS = process.env.SSM_PREV_PARAM ?? '/blindagency/keys/previous'
-// Grace window: previous key stays valid for 2hr after rotation
-const DELETION_WINDOW_DAYS = 7 // KMS minimum; we rely on SSM removal to stop new decryptions
+// KMS PendingDeletion keys are immediately unusable for cryptographic operations.
+// We schedule deletion only after a key has been out of SSM for a full rotation cycle,
+// ensuring any clients holding the previous public key can still decrypt during the grace window.
+const DELETION_WINDOW_DAYS = 7 // KMS minimum; actual revocation happens via SSM removal
 
 function derToPem(der: Uint8Array): string {
   const b64 = Buffer.from(der).toString('base64')
@@ -37,25 +40,40 @@ export const handler = async (): Promise<void> => {
     // Tag is required by IAM policy — CreateKey is only permitted when this tag is present.
     Tags: [{ TagKey: 'Application', TagValue: 'BlindAgency' }],
   }))
-  const newKeyArn = created.KeyMetadata!.Arn!
+  const newKeyArn = created.KeyMetadata?.Arn
+  if (!newKeyArn) throw new Error('KMS CreateKey returned no Arn')
 
   // 2. Export the public key and format as PEM
   const pubKeyRes = await kms.send(new GetPublicKeyCommand({ KeyId: newKeyArn }))
-  const publicKeyPem = derToPem(pubKeyRes.PublicKey as Uint8Array)
+  if (!pubKeyRes.PublicKey) throw new Error('KMS GetPublicKey returned no PublicKey')
+  const publicKeyPem = derToPem(pubKeyRes.PublicKey)
   const keyId = randomUUID()
 
   const newEntry = JSON.stringify({ keyId, keyArn: newKeyArn, publicKeyPem })
 
   // 3. Rotate SSM: current → previous, new → current
-  //    Read current before overwriting so we can schedule its deletion
-  let previousKeyArn: string | null = null
-  const currentRes = await ssm.send(new GetParameterCommand({ Name: SSM_CURRENT })).catch(() => null)
+  //    Read both parameters in parallel so we know which key is retiring from SSM entirely.
+  const [currentRes, previousRes] = await Promise.all([
+    ssm.send(new GetParameterCommand({ Name: SSM_CURRENT })).catch(() => null),
+    ssm.send(new GetParameterCommand({ Name: SSM_PREVIOUS })).catch(() => null),
+  ])
 
+  // The key leaving SSM_PREVIOUS has been out of SSM_CURRENT for a full rotation cycle —
+  // all in-flight clients holding it will have had time to transition. Safe to KMS-delete.
+  let toDeleteKeyArn: string | null = null
+  if (previousRes?.Parameter?.Value) {
+    try {
+      const retiring = JSON.parse(previousRes.Parameter.Value) as unknown
+      if (typeof retiring === 'object' && retiring !== null && typeof (retiring as Record<string, unknown>).keyArn === 'string') {
+        toDeleteKeyArn = (retiring as { keyArn: string }).keyArn
+      }
+    } catch {
+      // Malformed SSM entry — skip deletion for safety
+    }
+  }
+
+  // Promote current → previous (overwrites any stale previous entry)
   if (currentRes?.Parameter?.Value) {
-    const prev = JSON.parse(currentRes.Parameter.Value) as { keyArn: string }
-    previousKeyArn = prev.keyArn
-
-    // Promote current to previous (overwrites any stale previous entry)
     await ssm.send(new PutParameterCommand({
       Name: SSM_PREVIOUS,
       Value: currentRes.Parameter.Value,
@@ -75,13 +93,16 @@ export const handler = async (): Promise<void> => {
     Overwrite: true,
   }))
 
-  // 5. Schedule deletion of the now-previous KMS key (2hr grace via SSM; KMS minimum is 7 days)
-  //    We stop new decryptions by removing it from SSM before it gets KMS-deleted.
-  //    The 7-day KMS window is a safety net for any in-flight sessions beyond the SSM window.
-  if (previousKeyArn) {
+  // 5. Schedule deletion of the key that cycled fully out of SSM — it is now unreachable by
+  //    any client. The 7-day window satisfies the KMS minimum; actual access was cut at SSM.
+  if (toDeleteKeyArn) {
     await kms.send(new ScheduleKeyDeletionCommand({
-      KeyId: previousKeyArn,
+      KeyId: toDeleteKeyArn,
       PendingWindowInDays: DELETION_WINDOW_DAYS,
-    }))
+    })).catch((err: unknown) => {
+      // Already pending deletion (e.g. double-fire or prior partial failure) — treat as success
+      if (err instanceof KMSInvalidStateException) return
+      throw err
+    })
   }
 }
