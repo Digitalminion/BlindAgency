@@ -12,6 +12,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
+    "@emnapi/core": "1.10.0",
+    "@emnapi/runtime": "1.10.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.0"
   }
